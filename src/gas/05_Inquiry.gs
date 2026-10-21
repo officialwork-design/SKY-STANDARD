@@ -97,7 +97,8 @@ function acceptInquiryUnverified_(ev, userId, cat, text, note) {
       appendRow_(SHEETS.INQUIRIES, {
         '受付ID': id, 'LINEユーザーID': userId, '受付日時': nowString_(), '種別': cat.label,
         '内容': String(text || '').substring(0, 5000), '対応状況': '未対応', '担当者': '', '回答日時': '',
-        '備考': [note, cat.important ? '重要' : '', 'GAS単体受信（応答トークン確認済み・署名未検証）'].filter(String).join(' / ')
+        '備考': [note, cat.important ? '重要' : '', 'GAS単体受信（応答トークン確認済み・署名未検証）'].filter(String).join(' / '),
+        '自動返信有効': true
       });
     });
     logInfo_('inquiry.saved', { id: id, category: cat.label, userId: userId, verified: false });
@@ -177,7 +178,8 @@ function saveInquiry_(userId, cat, text, note) {
       '対応状況': '未対応',
       '担当者': '',
       '回答日時': '',
-      '備考': note || (cat.important ? '重要' : '')
+      '備考': note || (cat.important ? '重要' : ''),
+      '自動返信有効': true // 通常の問い合わせは自動返信を続ける（12_Operator.gs）
     });
     logInfo_('inquiry.saved', { id: id, category: cat.label, userId: userId });
     return id;

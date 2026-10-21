@@ -113,7 +113,7 @@ test('開くと「SKY STANDARD」メニューが1つだけ表示され、指定�
     { name: '初期設定', items: ['シート列・設定行の補完', 'ID・URL設定チェック', 'LINE接続チェック', 'ID管理の変更を反映（再読込）'] },
     { name: 'LINE管理', items: ['リッチメニュー登録・更新', 'リッチメニュー設定確認', '今月の配信数確認'] },
     { name: '予約・通知', items: ['承認待ち通知を送信（選択中の行）', '選択中の通知を却下', '失敗した通知を再送', '通知テンプレート確認'] },
-    { name: 'お問い合わせ', items: ['オペレーター対応状況', 'オペレーター対応を終了（選択中の行）'] },
+    { name: 'お問い合わせ', items: ['自動返信の状況（オペレーター対応）', '選択中の顧客の自動返信を再開（TRUEに）', '自動返信の状態を同期'] },
     { name: 'システム管理', items: ['トリガー設定', 'トリガー状態確認', '接続・設定診断', 'エラーログを開く', 'エラーログ設定・動作確認'] }
   ]);
 });
@@ -314,23 +314,26 @@ test('ライブラリ呼び出し自体が失敗したら、管理メニュー�
   assert.doesNotMatch(rows[0]['エラーメッセージ'], /taro@example\.com/);
 });
 
-test('お問い合わせ: 選択中の行のオペレーター対応を終了（確認ダイアログ「いいえ」なら何もしない／「はい」で終了）', () => {
-  const s = setup({ answers: ['NO', 'YES'] });
+test('お問い合わせ: 選択中の顧客の自動返信を再開（確認「いいえ」なら何もしない／「はい」で TRUE に）と同期', () => {
+  const s = setup({ answers: ['NO', 'YES', 'YES'] });
   const id = 'INQ-20261021-0001';
-  s.lib.sheets['問い合わせ管理'].data.push([id, USER, '2026-10-21 10:00:00', 'オペレーター相談', '依頼', '対応中', '', '', '']);
-  s.lib.ctx.setOperatorState_(USER, { id, since: Date.now(), n: 0 });
+  const d = s.lib.sheets['問い合わせ管理'].data;
+  d[0].push('自動返信有効');
+  d.push([id, USER, '2026-10-21 10:00:00', 'オペレーター相談', '依頼', '対応中', '', '', '', false]);
   s.activeSheet.name = 'FAQ';
   s.ctx.skyMenuOperatorRelease();
   assert.match(s.last().msg, /「問い合わせ管理」シートで対象の行を1行だけ選択/);
   s.activeSheet.name = '問い合わせ管理';
   s.activeSheet.row = 2;
   s.ctx.skyMenuOperatorRelease();
-  assert.match(s.last().msg, /自動応答を再開します/);
-  assert.ok(s.lib.props['OPERATOR_MODE:' + USER], '「いいえ」では解除しない');
+  assert.match(s.last().msg, /自動返信を再開します/);
+  assert.equal(s.lib.rows('問い合わせ管理')[0]['自動返信有効'], false, '「いいえ」では変更しない');
   s.ctx.skyMenuOperatorRelease();
-  assert.match(s.last().msg, /オペレーター対応を終了し、自動応答を再開しました/);
-  assert.equal(s.lib.props['OPERATOR_MODE:' + USER], undefined);
-  assert.equal(s.lib.rows('問い合わせ管理')[0]['対応状況'], '対応完了');
+  assert.match(s.last().msg, /自動返信を再開しました/);
+  assert.equal(s.lib.rows('問い合わせ管理')[0]['自動返信有効'], true);
+  assert.equal(s.lib.rows('問い合わせ管理')[0]['対応状況'], '対応中');
+  s.ctx.skyMenuOperatorSync();
+  assert.match(s.last().msg, /停止の記録を作成：0 件/);
   s.ctx.skyMenuOperatorStatus();
-  assert.match(s.last().msg, /オペレーター対応中の利用者はいません/);
+  assert.match(s.last().msg, /停止中（自動返信有効=FALSE）：0 名/);
 });

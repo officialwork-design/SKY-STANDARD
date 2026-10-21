@@ -43,8 +43,9 @@ function buildMenu_() {
       .addItem('失敗した通知を再送', 'skyMenuRetry')
       .addItem('通知テンプレート確認', 'skyMenuTemplates'))
     .addSubMenu(ui.createMenu('お問い合わせ')
-      .addItem('オペレーター対応状況', 'skyMenuOperatorStatus')
-      .addItem('オペレーター対応を終了（選択中の行）', 'skyMenuOperatorRelease'))
+      .addItem('自動返信の状況（オペレーター対応）', 'skyMenuOperatorStatus')
+      .addItem('選択中の顧客の自動返信を再開（TRUEに）', 'skyMenuOperatorRelease')
+      .addItem('自動返信の状態を同期', 'skyMenuOperatorSync'))
     .addSubMenu(ui.createMenu('システム管理')
       .addItem('トリガー設定', 'skyMenuInstallTriggers')
       .addItem('トリガー状態確認', 'skyMenuTriggerStatus')
@@ -212,16 +213,23 @@ function skyMenuTemplates() { return run_('templates'); }
 function skyMenuOperatorStatus() { return run_('operatorStatus'); }
 
 /**
- * 選択中の問い合わせのオペレーター対応を終了し、自動応答を再開する。
- * 通常は「対応状況」を「対応完了」にするだけでよい（次の受信時に自動で解除）。
- * こちらは行が見つからない等で自動解除されない場合や、すぐに解除したい場合に使う。
+ * 選択中の問い合わせの顧客の自動返信を再開する。
+ * 通常は、その行の「自動返信有効」を TRUE にするだけでよい（次のメッセージから再開）。
+ * こちらはその顧客の FALSE の行をまとめて TRUE にし、内部記録もすぐに合わせる。
  */
 function skyMenuOperatorRelease() {
   var id = selectedRowValue_(INQUIRY_SHEET, '受付ID');
   if (!id) return;
-  if (!confirm_('オペレーター対応を終了', id + ' のオペレーター対応を終了し、この利用者への自動応答を再開します。\n' +
-    '対応状況が「対応完了」でない場合は「対応完了」に更新します（利用者へのメッセージ送信は行いません）。\nよろしいですか？')) return;
+  if (!confirm_('自動返信の再開', id + ' の顧客への Bot の自動返信を再開します。\n' +
+    'この顧客の「自動返信有効」が FALSE の行をすべて TRUE にします（対応状況・担当者は変更しません。利用者へのメッセージ送信は行いません）。\nよろしいですか？')) return;
   return run_('operatorRelease', { inquiryId: id });
+}
+
+/** シートの「自動返信有効」に合わせて内部記録（スクリプトプロパティ）をまとめて修正 */
+function skyMenuOperatorSync() {
+  if (!confirm_('自動返信の状態を同期', '問い合わせ管理の「自動返信有効」に合わせて、内部記録（スクリプトプロパティ）を修正します。\n' +
+    'シートの値は変更しません（旧版の記録の移行を除く）。利用者へのメッセージ送信は行いません。実行しますか？')) return;
+  return run_('operatorSync');
 }
 
 /* ---------- システム管理・トリガー ---------- */

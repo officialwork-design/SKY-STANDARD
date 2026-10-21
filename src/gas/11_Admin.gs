@@ -190,6 +190,7 @@ var ADMIN_ACTIONS = {
   /* オペレーター対応（12_Operator.gs） */
   operatorStatus: function () { return adminOperatorStatus_(); },
   operatorRelease: function (p) { return adminOperatorRelease_(p.inquiryId); },
+  operatorSync: function () { return adminOperatorSync_(); },
   /* 手動実行 */
   runReminders: function () {
     var n = sendFlightReminders_();
@@ -280,7 +281,7 @@ function adminSetupSheets_() {
     '・ID管理に追加した設定キー：' + (r.idKeys.join('、') || 'なし'),
     '・追加した通知テンプレート（有効=OFF）：' + (r.templates.join('、') || 'なし'),
     '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み'),
-    '・問い合わせ管理「対応状況」の選択肢（未対応／対応中／対応完了）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
+    '・問い合わせ管理の選択肢（対応状況：未対応／対応中／対応完了、自動返信有効：TRUE／FALSE）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
     '\n既存のデータ・行は変更していません。'
   ];
   if (r.missingSheets.length) msg.unshift('【注意】次のシートが見つかりません（自動作成はしません）：' + r.missingSheets.join('、'));

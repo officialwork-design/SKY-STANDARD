@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-10-21.6-operator',
+  BUILD: '2026-10-21.7-autoreply-flag',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',
@@ -61,7 +61,7 @@ REQUIRED_COLUMNS[SHEETS.CUSTOMERS] = ['LINEユーザーID', '表示名', '氏名
 REQUIRED_COLUMNS[SHEETS.RESERVATIONS] = ['予約ID', 'LINEユーザーID', 'プランID', 'プラン名', '搭乗日', '時間帯', '人数',
   '金額', '予約状態', '決済状態', '予約サイト管理URL', '最終更新', '集合場所', '注意事項', '最終イベント日時'];
 REQUIRED_COLUMNS[SHEETS.INQUIRIES] = ['受付ID', 'LINEユーザーID', '受付日時', '種別', '内容', '対応状況', '担当者',
-  '回答日時', '備考'];
+  '回答日時', '備考', '自動返信有効']; // 自動返信有効は末尾に追加（既存列の位置は変えない。12_Operator.gs）
 REQUIRED_COLUMNS[SHEETS.ID_MANAGEMENT] = ['設定キー', '設定値', '分類', '保存先・取扱い', '説明'];
 REQUIRED_COLUMNS[SHEETS.TEMPLATES] = ['テンプレートID', '用途', '送信タイミング', '本文', '有効', '備考'];
 REQUIRED_COLUMNS[SHEETS.FAQ] = ['FAQ ID', 'カテゴリ', '質問・キーワード', '回答', '有効', '要有人確認'];
