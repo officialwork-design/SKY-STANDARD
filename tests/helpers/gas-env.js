@@ -38,6 +38,16 @@ function seedSheets() {
       ['F003', '運航', '雨天・悪天候', '天候等により運航内容が変更される場合があります。最新情報は担当者からご案内します。', 'ON', 'YES'],
       ['F004', 'キャンセル', 'キャンセル料', 'キャンセル条件はプラン・予約条件によって異なります。予約詳細をご確認ください。', 'ON', 'YES']],
     '送信ログ': [['送信ID', 'LINEユーザーID', '通知種別', '予約ID', '送信日時', '結果', 'エラー内容']],
+    'ID管理': [['設定キー', '設定値', '分類', '保存先・取扱い', '説明'],
+      ['SPREADSHEET_ID', '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es', 'ID', 'GASスクリプトプロパティ（起動用）', ''],
+      ['GAS_SCRIPT_ID', '1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff', 'ID', 'シート', ''],
+      ['LINE_LOGIN_CHANNEL_ID', '', 'ID', '', ''], ['LIFF_ID', '', 'ID', '', ''], ['GAS_WEBAPP_URL', '', 'URL', 'シート', ''],
+      ['BOOKING_SITE_URL', '', 'URL', 'シート', ''], ['BOOKING_CONFIRM_URL', '', 'URL', 'シート', ''], ['PLAN_LIST_URL', '', 'URL', 'シート', ''],
+      ['CHARTER_URL', '', 'URL', 'シート', ''], ['ADMIN_NOTIFY_TARGET', '', 'ID', 'シート', ''], ['RICHMENU_IMAGE_FILE_ID', '', 'ID', '', ''],
+      ['RESERVATION_API_BASE_URL', '', 'URL', '', ''],
+      ['LINE_CHANNEL_ACCESS_TOKEN', '', '秘密情報', 'GASスクリプトプロパティのみ', 'このシートに入力しない'],
+      ['LINE_CHANNEL_SECRET', '', '秘密情報', '', ''], ['RELAY_SHARED_SECRET', '', '秘密情報', '', ''],
+      ['RESERVATION_WEBHOOK_SECRET', '', '秘密情報', '', ''], ['RESERVATION_API_KEY', '', '秘密情報', '', '']],
     '実装タスク': [['優先度', '機能', '実装内容', '担当システム', '状態', '備考'], ['高', '予約サイト遷移', 'リッチメニューURI設定', 'LINE', '未着手', 'URL確定後']]
   };
 }
@@ -101,11 +111,18 @@ function createGasEnv(opts = {}) {
   const props = Object.assign({}, opts.props || {});
   const cache = new Map();
   const fetchCalls = [];
+  const triggers = [];
   const logs = [];
   const mails = [];
   let fetchHandler = opts.fetch || (() => ({ code: 200, body: '{}' }));
 
-  const ss = { getSheetByName: (n) => sheets[n] || null, getSpreadsheetTimeZone: () => 'Asia/Tokyo' };
+  const env = { user: opts.user === undefined ? 'owner@example.com' : opts.user };
+  const ss = {
+    getSheetByName: (n) => sheets[n] || null,
+    getSpreadsheetTimeZone: () => 'Asia/Tokyo',
+    getId: () => '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es',
+    getOwner: () => ({ getEmail: () => opts.owner || 'owner@example.com' })
+  };
 
   const ctx = {
     console: {
@@ -116,7 +133,7 @@ function createGasEnv(opts = {}) {
     },
     Date, JSON, Math, Object, Array, String, Number, Error, RegExp, Intl, isFinite, parseInt, parseFloat,
     encodeURIComponent, decodeURIComponent,
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss, getUi: () => { throw new Error('no ui'); } },
+    SpreadsheetApp: { getActiveSpreadsheet: () => (opts.noActive ? null : ss), openById: () => ss, getUi: () => { throw new Error('no ui'); } },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (k in props ? props[k] : null),
@@ -154,8 +171,20 @@ function createGasEnv(opts = {}) {
       createTextOutput: (s) => ({ content: s, setMimeType() { return this; }, getContent() { return s; } })
     },
     MailApp: { sendEmail: (m) => mails.push(m) },
-    Session: { getActiveUser: () => ({ getEmail: () => 'admin@example.com' }) },
-    ScriptApp: { getProjectTriggers: () => [] },
+    Session: {
+      getActiveUser: () => ({ getEmail: () => env.user }),
+      getEffectiveUser: () => ({ getEmail: () => env.user })
+    },
+    ScriptApp: {
+      getScriptId: () => '1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff',
+      getProjectTriggers: () => triggers.slice(),
+      deleteTrigger: (t) => { triggers.splice(triggers.indexOf(t), 1); },
+      newTrigger: (fn) => {
+        const b = { timeBased: () => b, atHour: () => b, everyDays: () => b, inTimezone: () => b, everyMinutes: () => b,
+          create: () => { const t = { getHandlerFunction: () => fn }; triggers.push(t); return t; } };
+        return b;
+      }
+    },
     DriveApp: { getFileById: () => { throw new Error('not mocked'); } }
   };
   vm.createContext(ctx);
@@ -164,7 +193,8 @@ function createGasEnv(opts = {}) {
   });
 
   return {
-    ctx, sheets, props, cache, fetchCalls, logs, mails,
+    ctx, sheets, props, cache, fetchCalls, logs, mails, env, triggers,
+    setUser(u) { env.user = u; },
     setFetch(fn) { fetchHandler = fn; },
     /** シートの行をオブジェクト配列で取得 */
     rows(name) {
@@ -177,11 +207,16 @@ function createGasEnv(opts = {}) {
         return [k, v];
       })));
     },
-    setSetting(key, value) {
-      const d = sheets['LINE設定'].data;
+    /** ID管理シートの値を変更（運営がシートを編集したのと同じ。キャッシュ無効化は呼び出し側の責務） */
+    editIdSheet(key, value) {
+      const d = sheets['ID管理'].data;
       const row = d.find((r) => r[0] === key);
-      if (row) row[1] = value; else d.push([key, value, '']);
-      vm.runInContext('__settingsCache = null; __ss = null;', ctx);
+      if (row) row[1] = value; else d.push([key, value, '', '', '']);
+    },
+    /** ID管理を変更し、設定キャッシュも破棄（＝onEdit トリガーで反映されたのと同じ状態） */
+    setSetting(key, value) {
+      this.editIdSheet(key, value);
+      vm.runInContext('invalidateIdCache_(); __ss = null;', ctx);
     },
     resetRequestCache() { vm.runInContext('__settingsCache = null;', ctx); },
     doPost(obj) {

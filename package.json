@@ -8,7 +8,8 @@
     "test:e2e": "node tests/e2e/liff-page.check.js",
     "richmenu:render": "node tools/render-richmenu.js",
     "gas:push": "clasp push",
-    "gas:deploy": "clasp deploy --description \"release\""
+    "gas:deploy": "clasp deploy --description \"release\"",
+    "sheet-admin:push": "cd src/sheet-admin && clasp push --force"
   },
   "engines": { "node": ">=18" },
   "devDependencies": {}

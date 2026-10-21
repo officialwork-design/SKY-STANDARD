@@ -57,7 +57,7 @@ function handleLiffApi_(req) {
  */
 function verifyIdToken_(idToken) {
   if (!idToken || typeof idToken !== 'string') throw new Error('id_token_missing');
-  var clientId = requireProp_(PROP_KEYS.LOGIN_CHANNEL_ID);
+  var clientId = requireSetting_(ID_KEYS.LINE_LOGIN_CHANNEL_ID);
   var res = UrlFetchApp.fetch(APP.LINE_VERIFY_ID_TOKEN_URL, {
     method: 'post',
     payload: { id_token: idToken, client_id: clientId },
@@ -74,13 +74,21 @@ function verifyIdToken_(idToken) {
 }
 
 function reservationSource_() {
-  return getProp_(PROP_KEYS.RESERVATION_API_BASE_URL) ? 'api' : 'sheet';
+  return getSetting_(ID_KEYS.RESERVATION_API_BASE_URL) ? 'api' : 'sheet';
 }
 
 /** 予約サイト API 呼び出し */
 function reservationApiFetch_(method, path, payload) {
-  var base = requireProp_(PROP_KEYS.RESERVATION_API_BASE_URL).replace(/\/+$/, '');
+  var base = requireSetting_(ID_KEYS.RESERVATION_API_BASE_URL).replace(/\/+$/, '');
   if (!/^https:\/\//i.test(base)) throw new ConfigError('RESERVATION_API_BASE_URL は https で指定してください', [PROP_KEYS.RESERVATION_API_BASE_URL]);
+  // API キーの送信先を固定：ID管理シート（編集者が変更可能）の URL だけを信用せず、
+  // スクリプトプロパティ RESERVATION_API_ALLOWED_HOST と一致するホストにのみキーを送る
+  var allowedHost = requireProp_(PROP_KEYS.RESERVATION_API_ALLOWED_HOST).toLowerCase();
+  var host = (base.match(/^https:\/\/([^\/:?#]+)/i) || [])[1] || '';
+  if (host.toLowerCase() !== allowedHost) {
+    throw new ConfigError('RESERVATION_API_BASE_URL（ID管理シート）のホスト「' + host + '」が、スクリプトプロパティ ' +
+      'RESERVATION_API_ALLOWED_HOST と一致しないため、API キーを送信しません。', [PROP_KEYS.RESERVATION_API_ALLOWED_HOST]);
+  }
   var key = requireProp_(PROP_KEYS.RESERVATION_API_KEY);
   var params = { method: method, headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true };
   if (payload) { params.contentType = 'application/json'; params.payload = JSON.stringify(payload); }

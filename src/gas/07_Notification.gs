@@ -51,6 +51,8 @@ var SEND_RESULT = {
 
 /** 処理中のまま放置された送信を再送対象とみなすまでの時間 */
 var STALE_PROCESSING_MS = 15 * 60 * 1000;
+/** X-Line-Retry-Key は24時間有効。余裕を見て23時間を自動再送の上限にする */
+var RETRY_KEY_SAFE_MS = 23 * 60 * 60 * 1000;
 
 /** イベント日時・シート日時の解釈（Date / ISO / 'yyyy-MM-dd HH:mm:ss'(JST)） */
 function parseEventTime_(v) {
@@ -249,27 +251,57 @@ function claimForDelivery_(sendId, canClaim) {
 function isRetryTarget_(row) {
   if (row['結果'] === SEND_RESULT.RETRY_WAIT) return true;
   if (row['結果'] !== SEND_RESULT.PROCESSING) return false;
-  // 実行中断等で「処理中」のまま残った行（同じ X-Line-Retry-Key で再送するため二重送信にならない）
+  // 実行中断等で「処理中」のまま残った行（同じ X-Line-Retry-Key で再送するため二重送信にならない）。
+  // ただし X-Line-Retry-Key の有効期間（24時間）を過ぎた行は重複の恐れがあるため自動再送しない。
   var t = parseEventTime_(row['送信日時']);
-  return !!t && Date.now() - t.getTime() > STALE_PROCESSING_MS;
+  if (!t) return false;
+  var age = Date.now() - t.getTime();
+  return age > STALE_PROCESSING_MS && age < RETRY_KEY_SAFE_MS;
+}
+
+/** 24時間近く「処理中」のまま残った行を「失敗」にする（重複送信を避けるため手動確認に回す） */
+function failExpiredProcessing_() {
+  var n = 0;
+  readRows_(SHEETS.SEND_LOG).forEach(function (row) {
+    if (row['結果'] !== SEND_RESULT.PROCESSING) return;
+    var t = parseEventTime_(row['送信日時']);
+    if (t && Date.now() - t.getTime() >= RETRY_KEY_SAFE_MS) {
+      updateRow_(SHEETS.SEND_LOG, row.__row, { '結果': SEND_RESULT.FAILED,
+        'エラー内容': '処理中のまま24時間近く経過したため自動再送を停止（重複送信防止）。利用者への到達を確認してください' });
+      n++;
+    }
+  });
+  return n;
 }
 
 /** 「失敗(再試行待ち)」と放置された「処理中」の通知を再送する（10分おきトリガー想定） */
-function retryFailedSends() {
+function retryFailedSends_() {
   var started = Date.now();
+  var summary = { targets: 0, processed: 0, results: {}, expired: failExpiredProcessing_() };
   var targets = readRows_(SHEETS.SEND_LOG).filter(isRetryTarget_);
+  summary.targets = targets.length;
   targets.forEach(function (t) {
     if (Date.now() - started > 4 * 60 * 1000) return; // 実行時間制限（6分）対策
     var sendId = String(t['送信ID']);
     var row = claimForDelivery_(sendId, isRetryTarget_);
     if (!row) return;
     var n = loadPendingPayload_(sendId);
+    var result;
     if (!n) {
       updateRow_(SHEETS.SEND_LOG, row.__row, { '結果': SEND_RESULT.FAILED, 'エラー内容': '再送データなし' });
-      return;
+      result = SEND_RESULT.FAILED;
+    } else {
+      result = deliver_(sendId, row.__row, n, (parseInt(row['再試行回数'], 10) || 0) + 1).result;
     }
-    deliver_(sendId, row.__row, n, (parseInt(row['再試行回数'], 10) || 0) + 1);
+    summary.processed++;
+    summary.results[result] = (summary.results[result] || 0) + 1;
   });
+  return summary;
+}
+
+/** 再送対象の件数（管理メニューの確認ダイアログ用） */
+function countRetryTargets_() {
+  return readRows_(SHEETS.SEND_LOG).filter(isRetryTarget_).length;
 }
 
 /* ---------- 承認 ---------- */
@@ -288,10 +320,12 @@ function approvePendingNotification_(sendId, approver) {
 
 /** 承認却下 */
 function rejectPendingNotification_(sendId) {
-  var row = findRow_(SHEETS.SEND_LOG, '送信ID', sendId);
-  if (!row || row['結果'] !== SEND_RESULT.PENDING_APPROVAL) throw new Error('承認待ちの送信IDではありません: ' + sendId);
-  updateRow_(SHEETS.SEND_LOG, row.__row, { '結果': SEND_RESULT.REJECTED });
-  deletePendingPayload_(sendId);
+  withLock_(function () {
+    var row = findRow_(SHEETS.SEND_LOG, '送信ID', sendId);
+    if (!row || row['結果'] !== SEND_RESULT.PENDING_APPROVAL) throw new Error('承認待ちの送信IDではありません: ' + sendId);
+    updateRow_(SHEETS.SEND_LOG, row.__row, { '結果': SEND_RESULT.REJECTED });
+    deletePendingPayload_(sendId);
+  });
 }
 
 /* ---------- 搭乗前日リマインド（時間主導トリガー） ---------- */
@@ -301,7 +335,7 @@ function rejectPendingNotification_(sendId) {
  * 冪等キー: 予約ID:FLIGHT_REMINDER:搭乗日 → 複数回実行しても1回のみ送信。
  * ※ 運航確定の保証ではない旨はテンプレート側で表現する。
  */
-function sendFlightReminders() {
+function sendFlightReminders_() {
   var started = Date.now();
   var tomorrow = Utilities.formatDate(new Date(Date.now() + 24 * 3600 * 1000), APP.TIMEZONE, 'yyyy-MM-dd');
   var sent = 0;

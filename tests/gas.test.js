@@ -139,7 +139,7 @@ test('ブロック時は友だち状態をブロックに更新し、通知対�
 
 test('「予約」: URL 設定済みなら予約サイトへのボタン', () => {
   const env = envWith();
-  env.setSetting('予約サイトURL', 'https://booking.example.jp/');
+  env.setSetting('BOOKING_SITE_URL', 'https://booking.example.jp/');
   send(env, textEvent('予約'));
   const m = lastReply(env).messages[0];
   assert.equal(m.template.actions[0].uri, 'https://booking.example.jp/');
@@ -155,7 +155,7 @@ test('「予約」: URL 未設定ならダミー URL を出さず準備中と案
 
 test('http の URL は無効として扱う', () => {
   const env = envWith();
-  env.setSetting('予約サイトURL', 'http://insecure.example.jp/');
+  env.setSetting('BOOKING_SITE_URL', 'http://insecure.example.jp/');
   send(env, textEvent('予約'));
   assert.doesNotMatch(JSON.stringify(lastReply(env)), /insecure/);
 });
@@ -170,7 +170,7 @@ test('表記揺れ（ひらがな・全角英字）を吸収', () => {
 
 test('優先順位: 「予約確認」は予約より優先され LIFF URL を返す', () => {
   const env = envWith();
-  env.setSetting('LIFF ID', '1234567890-AbCdEfGh');
+  env.setSetting('LIFF_ID', '1234567890-AbCdEfGh');
   send(env, textEvent('予約確認したいです'));
   assert.equal(lastReply(env).messages[0].template.actions[0].uri, 'https://liff.line.me/1234567890-AbCdEfGh');
 });
@@ -226,7 +226,7 @@ test('一致しない質問は担当者へ送る導線を出す', () => {
 
 test('問い合わせ: 種別選択 → 内容入力 → 保存・受付返信・運営通知', () => {
   const env = envWith();
-  env.setSetting('管理者通知先', ADMIN);
+  env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   send(env, textEvent('お問い合わせ'));
   const cats = lastReply(env).messages[0].quickReply.items.map((i) => i.action.label);
   assert.deepEqual(cats, ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ']);
@@ -299,7 +299,7 @@ test('リッチメニュー定義: 6 領域が全面を重複なく覆う', () =
 
 test('リッチメニュー: URL 未設定ボタンは postback（ダミー URL を使わない）', () => {
   const env = envWith();
-  env.setSetting('予約サイトURL', 'https://booking.example.jp/');
+  env.setSetting('BOOKING_SITE_URL', 'https://booking.example.jp/');
   const b = env.ctx.buildRichMenuDefinition_();
   assert.equal(b.definition.areas[0].action.type, 'uri');
   assert.deepEqual([...b.unset], ['予約確認', 'プラン一覧', 'チャーター']);
@@ -310,10 +310,10 @@ test('リッチメニュー: URL 未設定ボタンは postback（ダミー URL 
   assert.match(replyText(env), /準備中/);
 });
 
-test('スクリプトプロパティの URL がシートより優先', () => {
-  const env = envWith({ props: { PLANS_URL: 'https://prop.example.jp/plans' } });
-  env.setSetting('プラン一覧URL', 'https://sheet.example.jp/plans');
-  assert.equal(env.ctx.getUrlSetting_(env.ctx.SETTING_KEYS.PLANS_URL), 'https://prop.example.jp/plans');
+test('公開設定は ID管理シートから取得（スクリプトプロパティの同名値より優先）', () => {
+  const env = envWith({ props: { PLAN_LIST_URL: 'https://prop.example.jp/plans' } });
+  env.setSetting('PLAN_LIST_URL', 'https://sheet.example.jp/plans');
+  assert.equal(env.ctx.getUrlSetting_(env.ctx.SETTING_KEYS.PLANS_URL), 'https://sheet.example.jp/plans');
 });
 
 /* ---------- 予約確認（LIFF） ---------- */
@@ -377,7 +377,7 @@ test('予約確認: LINE ログインチャネル ID 未設定なら not_configu
 
 test('予約確認: 予約サイト API 経由でも他人の予約が混入したら除外', () => {
   const env = envWith({
-    props: { RESERVATION_API_BASE_URL: 'https://api.booking.example.jp', RESERVATION_API_KEY: 'k' },
+    props: { RESERVATION_API_BASE_URL: 'https://api.booking.example.jp', RESERVATION_API_KEY: 'k', RESERVATION_API_ALLOWED_HOST: 'api.booking.example.jp' },
     fetch: (url, params) => {
       if (url.indexOf('verify') !== -1) return okVerify(USER)(params.payload);
       if (url.indexOf('/line/reservations') !== -1) {
@@ -405,7 +405,7 @@ test('本人確認（紐付け）: 予約サイト API 未設定なら link_unav
 
 test('本人確認（紐付け）: API が一致を返したら予約管理へ同期', () => {
   const env = envWith({
-    props: { RESERVATION_API_BASE_URL: 'https://api.booking.example.jp', RESERVATION_API_KEY: 'k' },
+    props: { RESERVATION_API_BASE_URL: 'https://api.booking.example.jp', RESERVATION_API_KEY: 'k', RESERVATION_API_ALLOWED_HOST: 'api.booking.example.jp' },
     fetch: (url, params) => {
       if (url.indexOf('verify') !== -1) return okVerify(USER)(params.payload);
       if (url.indexOf('/line/link') !== -1) {
@@ -474,14 +474,14 @@ test('テンプレート未登録（キャンセル）は送信せず記録。se
   const env = envWith();
   env.doPost(reservationEnvelope(evt('BOOKING_CANCELLED', 'c1'), RESV));
   assert.equal(env.rows('送信ログ')[0]['結果'], 'テンプレート無効');
-  env.ctx.setupSheets();
+  env.ctx.setupSheets_();
   const t = env.rows('通知テンプレート').find((r) => r['テンプレートID'] === 'BOOKING_CANCELLED');
   assert.equal(t['有効'], 'OFF');
 });
 
 test('運航変更は承認待ち → 承認後に送信', () => {
   const env = envWith();
-  env.setSetting('管理者通知先', ADMIN);
+  env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   const r = env.doPost(reservationEnvelope(evt('FLIGHT_CHANGE', 'fc1'), RESV));
   assert.equal(r.result, '承認待ち');
   let toUser = env.linePosts('/push').filter((p) => p.json.to === USER);
@@ -501,7 +501,7 @@ test('通知失敗（5xx）は再試行待ち → 再送で成功', () => {
   assert.equal(env.rows('送信ログ')[0]['結果'], '失敗(再試行待ち)');
   assert.match(env.rows('送信ログ')[0]['エラー内容'], /500/);
   fail = false;
-  env.ctx.retryFailedSends();
+  env.ctx.retryFailedSends_();
   const row = env.rows('送信ログ')[0];
   assert.equal(row['結果'], '成功');
   assert.equal(row['再試行回数'], 1);
@@ -515,7 +515,7 @@ test('通知失敗（4xx）は再試行せず失敗として記録し運営へ�
     if (url.indexOf('/push') !== -1 && JSON.parse(params.payload).to === USER) return { code: 400, body: { message: 'Invalid' } };
     return lineOk(url);
   } });
-  env.setSetting('管理者通知先', ADMIN);
+  env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   env.doPost(reservationEnvelope(evt('BOOKING_CONFIRMED', 'r4'), RESV));
   assert.equal(env.rows('送信ログ')[0]['結果'], '失敗');
   assert.ok(env.linePosts('/push').some((p) => p.json.to === ADMIN && /通知の送信に失敗/.test(p.json.messages[0].text)));
@@ -528,8 +528,8 @@ test('搭乗前日リマインドは確定予約のみ・1回のみ送信', () =
   d.push(['R-1', USER, '', 'A', tomorrow, '10:00', 1, 1, '予約確定', '決済完了', '', '']);
   d.push(['R-2', OTHER, '', 'B', tomorrow, '11:00', 1, 1, '予約リクエスト受付', '', '', '']);
   d.push(['R-3', OTHER, '', 'C', '2099-01-01', '11:00', 1, 1, '予約確定', '', '', '']);
-  assert.equal(env.ctx.sendFlightReminders(), 1);
-  assert.equal(env.ctx.sendFlightReminders(), 0);
+  assert.equal(env.ctx.sendFlightReminders_(), 1);
+  assert.equal(env.ctx.sendFlightReminders_(), 0);
   assert.equal(env.linePosts('/push').length, 1);
 });
 
@@ -539,14 +539,19 @@ test('setupSheets は既存データを保持し、不足列・設定行のみ�
   const env = envWith();
   const before = JSON.stringify(env.sheets['FAQ'].data);
   const settingsBefore = env.sheets['LINE設定'].data.map((r) => r.slice());
-  const r = env.ctx.setupSheets();
+  const idBefore = JSON.stringify(env.sheets['ID管理'].data);
+  const r = env.ctx.setupSheets_();
+  assert.equal(JSON.stringify(env.sheets['ID管理'].data), idBefore);
+  assert.equal(r.spreadsheetIdSet, true);
+  assert.equal(env.props.SPREADSHEET_ID, '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es');
   assert.equal(JSON.stringify(env.sheets['FAQ'].data), before);
   assert.deepEqual([...r.columns['送信ログ']], ['冪等キー', 'イベントID', '再試行回数']);
   assert.deepEqual([...r.columns['予約管理']], ['集合場所', '注意事項', '最終イベント日時']);
   settingsBefore.forEach((row, i) => assert.deepEqual(env.sheets['LINE設定'].data[i].slice(0, 3), row));
-  assert.equal(r.settings.length, 0);
+  assert.equal(r.idKeys.length, 0);
+  assert.equal(r.missingSheets.length, 0);
   // 2回目は何も追加しない
-  const r2 = env.ctx.setupSheets();
+  const r2 = env.ctx.setupSheets_();
   assert.equal(Object.keys(r2.columns).length, 0);
   assert.equal(r2.templates.length, 0);
 });
@@ -619,13 +624,13 @@ test('処理中のまま放置された通知は再送対象になり、承認�
   d[2][h.indexOf('結果')] = '処理中';
   d[2][h.indexOf('送信日時')] = env.ctx.Utilities.formatDate(new Date(Date.now() - 20 * 60000), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   env.ctx.savePendingPayload_(String(d[2][0]).replace(/^'/, ''), { userId: USER, templateId: 'BOOKING_CONFIRMED', type: 'BOOKING_CONFIRMED', idempotencyKey: 'k', vars: {} });
-  env.ctx.retryFailedSends();
+  env.ctx.retryFailedSends_();
   assert.equal(env.rows('送信ログ')[1]['結果'], '成功');
 });
 
 test('受付返信に失敗しても運営通知は送られ、Webhook 再送で二重登録しない', () => {
   const env = envWith({ fetch: (url) => (url.indexOf('/reply') !== -1 ? { code: 500, body: {} } : lineOk(url)) });
-  env.setSetting('管理者通知先', ADMIN);
+  env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   env.ctx.setInquiryState_(USER, { c: '5' });
   const ev = textEvent('相談内容', USER, 'inq-x');
   const r = send(env, ev);

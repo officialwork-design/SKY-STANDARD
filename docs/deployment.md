@@ -4,7 +4,7 @@
 
 ## 1. GAS へのコード反映（clasp）
 
-対象 GAS プロジェクト: `1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff`（スプレッドシートにコンテナバインド）。
+対象 GAS プロジェクト: `1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff`（独立GAS。Web アプリ兼、管理メニューのライブラリ）。
 
 ```bash
 npm install -g @google/clasp
@@ -13,23 +13,26 @@ clasp login                       # GAS 編集権限のある Google アカウ�
 git clone https://github.com/officialwork-design/SKY-STANDARD.git
 cd SKY-STANDARD
 clasp status                      # 反映対象（src/gas/*.gs, appsscript.json）を確認
-clasp push                        # 既存の「コード.gs」(myFunction のみ) は上書きされます
+clasp push                        # src/gas の内容で独立GASを更新
 ```
 
 - `.clasp.json` の `rootDir` は `src/gas` です。
-- 既存の `コード.gs` には `myFunction` の空テンプレートのみがあることを確認済み（2026-10-21）。`clasp push` は GAS 側のファイル構成をローカルに合わせるため、`コード.gs` は削除されます。他に残したいコードがある場合は先に `clasp pull` で取得してください。
 
 ### 手動で反映する場合
 
 GAS エディタで `src/gas` の各ファイルと同名のスクリプトファイルを作成して内容を貼り付け、「プロジェクトの設定」→「appsscript.json をエディタで表示」をオンにして `appsscript.json` を置き換えます。
 
+## 1-2. 管理メニュー用GAS（スプレッドシートに紐づく）
+
+[sheet-admin.md](sheet-admin.md) の手順で作成・反映します（`cd src/sheet-admin && clasp create … && clasp push --force`）。独立GASはライブラリ `SkyStandard`（開発モード）として読み込まれるため、独立GASに `clasp push` するとメニューの処理も更新されます。
+
 ## 2. GAS Web アプリのデプロイ
 
-1. GAS エディタで `setupSheets` を一度実行し、権限を承認する（スプレッドシートのメニューからでも可）。
+1. スプレッドシートのメニュー「SKY STANDARD → 初期設定 → シート列・設定行の補完」を実行（`SPREADSHEET_ID` が独立GASのスクリプトプロパティに保存されます）。独立GASのエディタで任意の関数（例 `doGet`）を一度実行して、Web アプリ用の権限も承認してください。
 2. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」
    - 次のユーザーとして実行: **自分**
    - アクセスできるユーザー: **全員**（LINE・予約サイト・LIFF から匿名で呼び出すため。各リクエストは署名／ID トークンで認証）
-3. 発行された URL（`https://script.google.com/macros/s/.../exec`）を控える = `GAS_WEBAPP_URL`。
+3. 発行された URL（`https://script.google.com/macros/s/.../exec`）を ID管理シートの `GAS_WEBAPP_URL` に入力（リレーの環境変数にも設定）。
 4. コード更新時は「デプロイを管理」→ 既存デプロイを編集 →「新バージョン」で URL を変えずに更新（`clasp deploy -i <deploymentId>` でも可）。
 
 ## 3. 署名検証リレー（Cloud Run の例）

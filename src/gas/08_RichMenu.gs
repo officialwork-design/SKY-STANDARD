@@ -9,12 +9,12 @@
  *   │ チャーター  │ お問い合わせ │ よくある質問 │
  *   └────────────┴────────────┴────────────┘
  *
- * URL は「LINE設定」シート（またはスクリプトプロパティ）から読み込む。
+ * URL・LIFF ID・画像ファイルID は「ID管理」シートから読み込む。
  * URL 未設定のボタンはダミー URL にせず postback（a=menu_unset）にし、
  * タップ時は「準備中」を返信してログに記録する。シート「リッチメニュー」の「実装状態」列にも反映する。
  *
  * 画像: assets/richmenu/richmenu.png を Google ドライブにアップロードし、
- *       そのファイル ID をスクリプトプロパティ RICHMENU_IMAGE_FILE_ID に設定する。
+ *       そのファイル ID を「ID管理」シートの RICHMENU_IMAGE_FILE_ID に入力する。
  */
 
 var RICHMENU_SIZE = { width: 2500, height: 1686 };
@@ -70,8 +70,8 @@ function buildRichMenuDefinition_() {
  * リッチメニューを作成 → 画像アップロード → 既定に設定 → 旧メニュー削除。
  * スプレッドシートのメニューまたはエディタから実行する。
  */
-function deployRichMenu() {
-  var fileId = requireProp_(PROP_KEYS.RICHMENU_IMAGE_FILE_ID);
+function deployRichMenu_() {
+  var fileId = requireSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID);
   var built = buildRichMenuDefinition_();
   var oldDefault = null;
   try { oldDefault = lineFetch_('get', '/v2/bot/user/all/richmenu').body.richMenuId; } catch (e) { /* 既定なし */ }
@@ -115,7 +115,7 @@ function updateRichMenuSheetStatus_(built) {
 }
 
 /** 登録済みリッチメニュー一覧（管理用） */
-function listRichMenus() {
+function listRichMenus_() {
   var list = lineFetch_('get', '/v2/bot/richmenu/list').body.richmenus || [];
   return list.map(function (m) { return { id: m.richMenuId, name: m.name, areas: m.areas.length }; });
 }

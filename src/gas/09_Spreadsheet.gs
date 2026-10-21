@@ -11,13 +11,38 @@
 
 var __ss = null;
 
-/** 対象スプレッドシートを取得（SPREADSHEET_ID があれば優先、なければコンテナバインド先） */
+/**
+ * 対象スプレッドシートを取得。
+ *   1. スクリプトプロパティ SPREADSHEET_ID（起動用。独立 GAS の Web アプリ・トリガーはこれが必須）
+ *   2. 管理メニュー（ライブラリ呼び出し）からの実行時は呼び出し元のスプレッドシート
+ * 「ID管理」シートの SPREADSHEET_ID は確認用の写しで、起動には使わない（自己参照になるため）。
+ */
 function getSpreadsheet_() {
   if (__ss) return __ss;
   var id = getProp_(PROP_KEYS.SPREADSHEET_ID);
-  __ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
-  if (!__ss) throw new ConfigError('スプレッドシートを特定できません。SPREADSHEET_ID を設定してください。', [PROP_KEYS.SPREADSHEET_ID]);
+  if (id) {
+    __ss = SpreadsheetApp.openById(id);
+  } else {
+    try { __ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { __ss = null; }
+  }
+  if (!__ss) {
+    throw new ConfigError('スプレッドシートを特定できません。独立GASのスクリプトプロパティに SPREADSHEET_ID を設定してください' +
+      '（管理メニュー「初期設定 → シート列・設定行の補完」でも自動設定できます）。', [PROP_KEYS.SPREADSHEET_ID]);
+  }
   return __ss;
+}
+
+/**
+ * 「ID管理」シート（A列: 設定キー / B列: 設定値）を {キー: 値} で読む。
+ * 「LINE設定」シートとは別物で、公開可能な ID・URL の参照先はこちらに統一している。
+ */
+function readIdSheet_() {
+  var map = {};
+  readRows_(SHEETS.ID_MANAGEMENT).forEach(function (r) {
+    var k = String(r['設定キー'] || '').trim();
+    if (k) map[k] = String(r['設定値'] == null ? '' : r['設定値']).trim();
+  });
+  return map;
 }
 
 /** シート取得。存在しなければエラー（勝手に作成しない） */

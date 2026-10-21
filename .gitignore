@@ -3,6 +3,7 @@ node_modules/
 .env.*
 !.env.example
 .clasprc.json
+src/sheet-admin/.clasp.json
 src/web/booking/config.json
 tests/e2e/*.png
 *.log

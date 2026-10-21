@@ -16,7 +16,17 @@
  */
 
 function doGet(e) {
-  // ヘルスチェックのみ。設定値・内部情報は返さない。
+  // トリガー同期（管理者が管理メニューで要求した場合のみ作成。詳細は 11_Admin.gs）
+  if (e && e.parameter && e.parameter.sync === 'triggers') {
+    try {
+      var r = handleTriggerSync_();
+      return jsonOut_({ ok: r.ok, installed: r.installed });
+    } catch (err) {
+      logError_('triggers.sync_failed', err);
+      return jsonOut_({ ok: false, error: 'internal_error' });
+    }
+  }
+  // ヘルスチェック。設定値・内部情報は返さない。
   return jsonOut_({ ok: true, service: APP.NAME + ' LINE', time: new Date().toISOString() });
 }
 
