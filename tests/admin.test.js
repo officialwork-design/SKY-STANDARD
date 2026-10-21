@@ -220,9 +220,10 @@ test('リッチメニュー設定確認・登録（画像ID 未設定なら安�
   const e = env();
   e.setSetting('BOOKING_SITE_URL', 'https://booking.example.jp/');
   const c = e.ctx.adminRun('richMenuCheck');
-  assert.match(c.message, /【OK】フライト予約 → https:\/\/booking\.example\.jp\//);
-  assert.match(c.message, /【未設定】プラン一覧 → 準備中/);
-  assert.match(c.message, /既定リッチメニュー: 未登録/);
+  assert.match(c.message, /【OK】フライト予約 → リンク https:\/\/booking\.example\.jp\//);
+  assert.match(c.message, /【準備中】プラン一覧 → 「現在準備中です」を返信/);
+  assert.match(c.message, /【未設定】RICHMENU_IMAGE_FILE_ID/);
+  assert.match(c.message, /【未登録】既定のリッチメニューはまだ登録されていません/);
   const d = e.ctx.adminRun('richMenuDeploy');
   assert.equal(d.ok, false);
   assert.match(d.message, /RICHMENU_IMAGE_FILE_ID/);

@@ -235,7 +235,24 @@ function createGasEnv(opts = {}) {
         return b;
       }
     },
-    DriveApp: { getFileById: () => { throw new Error('not mocked'); } }
+    DriveApp: {
+      getFileById: (id) => {
+        const f = (opts.driveFiles || {})[id];
+        if (!f) throw new Error('File not found: ' + id);
+        return {
+          getName: () => f.name,
+          getBlob: () => {
+            const blob = {
+              contentType: f.contentType,
+              getBytes: () => Array.from(f.bytes).map((b) => (b > 127 ? b - 256 : b)),
+              getContentType: () => blob.contentType,
+              setContentType(t) { blob.contentType = t; return blob; }
+            };
+            return blob;
+          }
+        };
+      }
+    }
   };
   vm.createContext(ctx);
   fs.readdirSync(GAS_DIR).filter((f) => f.endsWith('.gs')).sort().forEach((f) => {
@@ -282,6 +299,21 @@ function createGasEnv(opts = {}) {
   };
 }
 
+/** テスト用の画像バイト列（ヘッダーのみ有効。PNG / JPEG のサイズ判定用） */
+function fakeImage(type, width, height, totalBytes = 400 * 1024) {
+  const buf = Buffer.alloc(totalBytes);
+  if (type === 'png') {
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(buf, 0);
+    buf.writeUInt32BE(width, 16); buf.writeUInt32BE(height, 20);
+  } else {
+    // SOI + APP0(16byte) + DQT(短い) + SOF0
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+      0xFF, 0xDB, 0x00, 0x04, 0x00, 0x00,
+      0xFF, 0xC0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03]).copy(buf, 0);
+  }
+  return buf;
+}
+
 /** リレーと同じ方式で封筒を作る */
 function relayEnvelope(body, secret, ts = Date.now()) {
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
@@ -296,4 +328,4 @@ function reservationEnvelope(payload, secret, ts = Date.now()) {
   return { kind: 'reservation_event', ts, payload: raw, sig };
 }
 
-module.exports = { createGasEnv, seedSheets, relayEnvelope, reservationEnvelope };
+module.exports = { createGasEnv, seedSheets, relayEnvelope, reservationEnvelope, fakeImage };

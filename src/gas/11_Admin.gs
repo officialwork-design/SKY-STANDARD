@@ -403,26 +403,49 @@ function adminCheckLine_(p) {
   return { ok: !lines.some(function (l) { return l.indexOf('【NG】') === 0; }), title: 'LINE接続チェック', message: lines.join('\n') };
 }
 
-/** リッチメニュー設定確認（登録予定のボタンと現在の既定メニュー） */
+/**
+ * リッチメニュー設定確認（LINE には何も登録しない）。
+ *   - 各ボタンの動作（リンク／準備中表示／メッセージ送信）とタップ領域
+ *   - 画像の検査（形式・1MB 以下・2500×1686px）
+ *   - LINE 側の既定メニューとの差分（URL を設定した後に再登録が必要か）
+ */
 function adminRichMenuCheck_() {
   var built = buildRichMenuDefinition_();
   var lines = built.definition.areas.map(function (a) {
-    var act = a.action;
-    var to = act.type === 'uri' ? act.uri : act.type === 'message' ? 'メッセージ「' + act.text + '」' : '準備中（URL未設定）';
-    return (act.type === 'postback' ? '【未設定】' : '【OK】') + act.label + ' → ' + to;
+    var act = a.action, b = a.bounds;
+    var to = act.type === 'uri' ? 'リンク ' + act.uri : act.type === 'message' ? 'メッセージ「' + act.text + '」を送信' : '「現在準備中です」を返信（URL 未設定）';
+    return (act.type === 'postback' ? '【準備中】' : '【OK】') + act.label + ' → ' + to +
+      '\n    タップ領域 x:' + b.x + '〜' + (b.x + b.width - 1) + ' / y:' + b.y + '〜' + (b.y + b.height - 1);
   });
-  var image = getSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID) ? '【OK】画像ファイルID設定済み' : '【未設定】RICHMENU_IMAGE_FILE_ID（ID管理シート）';
-  var current = '（LINE_CHANNEL_ACCESS_TOKEN 未設定のため LINE 側は未確認）';
-  if (getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN)) {
-    try {
-      var id = lineFetch_('get', '/v2/bot/user/all/richmenu').body.richMenuId;
-      current = id ? '既定リッチメニューID: ' + id : '既定リッチメニュー: なし';
-    } catch (e) {
-      current = e.status === 404 ? '既定リッチメニュー: 未登録' : '取得できませんでした: ' + e.message;
-    }
+  var problems = [];
+  var imageLines;
+  if (!getSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID)) {
+    imageLines = ['【未設定】RICHMENU_IMAGE_FILE_ID（ID管理シート）'];
+    problems.push('image');
+  } else {
+    var img = validateRichMenuImage_();
+    imageLines = img.ok
+      ? ['【OK】' + img.name + '（' + img.type + '・' + img.width + '×' + img.height + 'px・' + Math.round(img.bytes / 1024) + 'KB）']
+      : img.problems.map(function (p) { return '【NG】' + p; });
+    if (!img.ok) problems.push('image');
   }
-  return { ok: !built.unset.length, title: 'リッチメニュー設定確認',
-    message: '◆ 登録内容（ID管理シートの現在値）\n' + lines.join('\n') + '\n' + image + '\n\n◆ LINE 側\n' + current };
+  var lineLines;
+  if (!getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN)) {
+    lineLines = ['（LINE_CHANNEL_ACCESS_TOKEN 未設定のため LINE 側は未確認）'];
+  } else {
+    var cmp = compareRegisteredRichMenu_();
+    if (cmp.error) lineLines = ['【要確認】LINE 側の状態を取得できませんでした: ' + cmp.error];
+    else if (!cmp.registered) lineLines = ['【未登録】既定のリッチメニューはまだ登録されていません'];
+    else if (cmp.needsUpdate) lineLines = ['【要再登録】既定リッチメニューID: ' + cmp.richMenuId].concat(cmp.diffs.map(function (d) { return '  ・' + d; }))
+      .concat(['  → 「リッチメニュー登録・更新」を実行すると反映されます']);
+    else lineLines = ['【OK】登録済みの内容は現在の設定と一致しています（ID: ' + cmp.richMenuId + '）'];
+  }
+  var pendingNote = built.unset.length
+    ? '\n準備中のボタン: ' + built.unset.join('、') + '\n予約サイト完成後は「ID管理」シートに URL を入力し、「リッチメニュー登録・更新」を実行するとリンク方式に切り替わります。'
+    : '';
+  return { ok: !problems.length, title: 'リッチメニュー設定確認',
+    message: '◆ 登録内容（ID管理シートの現在値）\n' + lines.join('\n') + pendingNote +
+      '\n\n◆ 画像\n' + imageLines.join('\n') + '\n\n◆ LINE 側\n' + lineLines.join('\n') };
 }
 
 /** 選択行の通知情報（確認ダイアログ用） */

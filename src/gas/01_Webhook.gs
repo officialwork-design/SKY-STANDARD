@@ -392,8 +392,9 @@ function handlePostback_(ev, userId, data) {
     case 'faq_list':
       return replyMessage_(ev.replyToken, buildFaqMenu_());
     case 'menu_unset':
-      logWarn_('richmenu.unset_tapped', { item: String(p.item || '').substring(0, 20) });
-      return replyMessage_(ev.replyToken, '「' + (String(p.item || '').substring(0, 20) || 'このメニュー') + '」は現在準備中です。お手数ですが「お問い合わせ」からご連絡ください。');
+      // リッチメニューの準備中ボタン（URL 未設定）。返信のみで記録・状態変更はしない
+      logInfo_('richmenu.pending_tapped', { item: String(p.item || '').substring(0, 20) });
+      return replyMessage_(ev.replyToken, buildRichMenuPendingReply_(p.item));
     default:
       logInfo_('postback.unknown', { a: String(p.a || '').substring(0, 20) });
   }

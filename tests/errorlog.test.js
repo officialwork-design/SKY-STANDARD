@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
-const { createGasEnv, relayEnvelope, reservationEnvelope } = require('./helpers/gas-env');
+const { createGasEnv, relayEnvelope, reservationEnvelope, fakeImage } = require('./helpers/gas-env');
 
 const TOKEN = 'tok-SECRET-abcdefghijklmnop';
 const USER = 'U' + 'a'.repeat(32);
@@ -176,10 +176,11 @@ test('リッチメニュー作成途中の削除失敗（従来は握りつぶ�
     if (/\/v2\/bot\/richmenu$/.test(url)) return { code: 200, body: { richMenuId: 'richmenu-123' } };
     if (/\/v2\/bot\/richmenu\/richmenu-123$/.test(url) && p.method === 'delete') return { code: 500, body: {} };
     if (/\/v2\/bot\/user\/all\/richmenu$/.test(url)) return { code: 404, body: {} };
+    if (/\/content$/.test(url)) return { code: 500, body: {} }; // 画像アップロード失敗
     return { code: 200, body: {} };
-  } });
+  }, env: { driveFiles: { ['a'.repeat(30)]: { name: 'menu.jpg', contentType: 'image/jpeg', bytes: fakeImage('jpeg', 2500, 1686) } } } });
   e.setSetting('RICHMENU_IMAGE_FILE_ID', 'a'.repeat(30));
-  const res = e.ctx.adminRun('richMenuDeploy'); // DriveApp 未モック → 画像取得で失敗 → 作成したメニューを削除 → 削除も失敗
+  const res = e.ctx.adminRun('richMenuDeploy'); // 画像アップロード失敗 → 作成したメニューを削除 → 削除も失敗
   assert.equal(res.ok, false);
   const rows = errRows(e);
   assert.ok(rows.some((r) => r['発生元'] === 'LINE API' && r['関連ID'] === 'id:richmenu-123'));
