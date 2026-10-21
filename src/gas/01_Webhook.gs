@@ -67,7 +67,7 @@ function doGet(e) {
     }
   }
   // ヘルスチェック。設定値・内部情報は返さない。
-  return jsonOut_({ ok: true, service: APP.NAME + ' LINE', time: new Date().toISOString() });
+  return jsonOut_({ ok: true, service: APP.NAME + ' LINE', build: APP.BUILD, time: new Date().toISOString() });
 }
 
 function doPost(e) {

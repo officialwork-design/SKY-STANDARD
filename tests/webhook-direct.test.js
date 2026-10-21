@@ -236,6 +236,7 @@ test('LINE接続チェック（direct）：302 と GAS 受信記録を区別し�
 
 test('LINE接続チェック（direct）：LINE 側 200 かつ GAS 受信確認で OK', () => {
   const e = env({ extra: (url) => {
+    if (url === 'https://script.google.com/macros/s/AKfy/exec') return { code: 200, body: { ok: true, build: e.ctx.APP.BUILD } };
     if (url.indexOf('/v2/bot/info') !== -1) return { code: 200, body: { displayName: 'SKY STANDARD', userId: BOT } };
     if (url.indexOf('/webhook/endpoint') !== -1) return { code: 200, body: { endpoint: 'https://script.google.com/macros/s/AKfy/exec', active: true } };
     if (url.indexOf('/webhook/test') !== -1) { e.props.LAST_WEBHOOK_AT = String(Date.now() + 5); return { code: 200, body: { success: true, statusCode: 200, reason: 'OK' } }; }
@@ -328,4 +329,49 @@ test('同時刻に複数の未検証問い合わせを受けても受付IDが重
   }
   e.rows('問い合わせ管理').forEach((r) => ids.add(r['受付ID']));
   assert.equal(ids.size, 3);
+});
+
+/* ---------- デプロイ反映チェック（302 の再発防止） ---------- */
+
+function buildEnv(deployedBody) {
+  return env({ extra: (url) => {
+    if (url === 'https://script.google.com/macros/s/AKfyDEPLOY/exec') return { code: 200, body: deployedBody };
+    if (url.indexOf('/v2/bot/info') !== -1) return { code: 200, body: { displayName: 'SKY STANDARD', userId: BOT } };
+    if (url.indexOf('/webhook/endpoint') !== -1) return { code: 200, body: { endpoint: 'https://script.google.com/macros/s/AKfyDEPLOY/exec', active: true } };
+    if (url.indexOf('/quota') !== -1) return { code: 200, body: { type: 'none', totalUsage: 0 } };
+    return null;
+  } });
+}
+
+test('doGet は版（build）を返す（設定値・秘密は返さない）', () => {
+  const e = env();
+  const out = JSON.parse(e.ctx.doGet({ parameter: {} }).getContent());
+  assert.equal(out.build, e.ctx.APP.BUILD);
+  assert.doesNotMatch(JSON.stringify(out), /token|secret/i);
+});
+
+test('デプロイ済み Web アプリが旧コード（build なし）なら【NG】で新バージョンのデプロイを案内', () => {
+  const e = buildEnv({ ok: true, service: 'SKY STANDARD LINE' });
+  e.setSetting('GAS_WEBAPP_URL', 'https://script.google.com/macros/s/AKfyDEPLOY/exec');
+  const r = e.ctx.adminRun('checkLine');
+  assert.match(r.message, /【NG】Web アプリが古い版です（デプロイ済み: 版情報なし＝旧コード/);
+  assert.match(r.message, /新バージョン/);
+  assert.equal(r.ok, false);
+  assert.match(e.ctx.adminRun('diagnose').message, /◆ Web アプリの反映状況\n【NG】/);
+});
+
+test('デプロイ済み Web アプリが同じ版なら【OK】', () => {
+  const e = buildEnv(null);
+  const b = e.ctx.APP.BUILD;
+  e.setFetch((url, params) => (url === 'https://script.google.com/macros/s/AKfyDEPLOY/exec'
+    ? { code: 200, body: { ok: true, build: b } }
+    : lineMock((u) => {
+      if (u.indexOf('/v2/bot/info') !== -1) return { code: 200, body: { displayName: 'SKY STANDARD', userId: BOT } };
+      if (u.indexOf('/webhook/endpoint') !== -1) return { code: 200, body: { endpoint: 'https://script.google.com/macros/s/AKfyDEPLOY/exec', active: true } };
+      if (u.indexOf('/quota') !== -1) return { code: 200, body: { type: 'none', totalUsage: 0 } };
+      return null;
+    })(url, params)));
+  e.setSetting('GAS_WEBAPP_URL', 'https://script.google.com/macros/s/AKfyDEPLOY/exec');
+  const r = e.ctx.adminRun('checkLine');
+  assert.match(r.message, /【OK】Web アプリは保存済みコードと同じ版です/);
 });

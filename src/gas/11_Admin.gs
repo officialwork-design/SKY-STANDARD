@@ -345,6 +345,7 @@ function adminCheckLine_(p) {
     PropertiesService.getScriptProperties().setProperty(PROP_KEYS.BOT_USER_ID, info.userId);
   }
   lines.push('【情報】Webhook 受信方式: ' + (mode === WEBHOOK_MODES.DIRECT ? 'GAS単体（direct・署名検証なし）' : 'リレー経由（relay・署名検証あり）'));
+  lines.push(deployedBuildLine_());
 
   var gasUrl = getSetting_(ID_KEYS.GAS_WEBAPP_URL);
   var wh = null;
@@ -483,6 +484,7 @@ function adminDiagnose_(p) {
     var list = getProp_(PROP_KEYS.ADMIN_USERS);
     return list ? '【OK】ADMIN_USERS 登録済み（' + list.split(/[,\s]+/).filter(String).length + ' 名）' : '【要設定】ADMIN_USERS 未登録（誰も管理操作できません）';
   });
+  sec('Web アプリの反映状況', function () { return deployedBuildLine_(); });
   sec('LINE 接続', function () {
     if (!getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN)) return '【未設定】LINE_CHANNEL_ACCESS_TOKEN（スクリプトプロパティ）';
     return adminCheckLine_({}).message;
@@ -623,4 +625,35 @@ function adminTriggerStatus_() {
       (status ? '\n\n状況の記録: ' + Utilities.formatDate(new Date(status.at), APP.TIMEZONE, 'yyyy/MM/dd HH:mm') : '\n\n状況が未記録です。「トリガー設定」を実行してください。') +
       (legacy.length ? '\n【要整理】旧版のトリガー: ' + legacy.join('、') + '（「トリガー設定」で削除されます）' : '') +
       '\n\n※ トリガーは独立GAS（所有者の権限）で動作します。' };
+}
+
+/* ---------- デプロイ反映チェック ---------- */
+
+/**
+ * デプロイ済み Web アプリの版を取得（doGet の build）。
+ * @return {{build:string|null, error?:string}}
+ */
+function fetchDeployedBuild_() {
+  var url = getSetting_(ID_KEYS.GAS_WEBAPP_URL);
+  if (!url) return { build: null, error: 'GAS_WEBAPP_URL（ID管理シート）が未設定' };
+  try {
+    var res = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, followRedirects: true });
+    if (res.getResponseCode() !== 200) return { build: null, error: 'HTTP ' + res.getResponseCode() };
+    var body = JSON.parse(res.getContentText() || '{}');
+    return { build: body.build || '' };
+  } catch (e) {
+    return { build: null, error: String(e && e.message || e).substring(0, 120) };
+  }
+}
+
+/**
+ * 保存済みコード（管理メニューが参照するライブラリ＝HEAD）とデプロイ済み Web アプリの版の比較結果（1行）。
+ * Webhook を受けるのはデプロイ済みの版なので、不一致なら「新バージョン」でのデプロイが必要。
+ */
+function deployedBuildLine_() {
+  var r = fetchDeployedBuild_();
+  if (r.build === null) return '【要確認】Web アプリの版を取得できません（' + r.error + '）';
+  if (r.build === APP.BUILD) return '【OK】Web アプリは保存済みコードと同じ版です（' + APP.BUILD + '）';
+  return '【NG】Web アプリが古い版です（デプロイ済み: ' + (r.build || '版情報なし＝旧コード') + ' / 保存済み: ' + APP.BUILD + '）\n' +
+    '  → 本体GASで「デプロイ → デプロイを管理 → 編集 → バージョン: 新バージョン → デプロイ」を実行してください（URL は変わりません）。';
 }
