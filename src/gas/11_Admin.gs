@@ -184,6 +184,9 @@ var ADMIN_ACTIONS = {
       message: url ? 'Web アプリでトリガーを作成します。' : 'GAS_WEBAPP_URL（ID管理シート）が未設定のため、Web アプリ経由で作成できません。' };
   },
   triggerStatus: function () { return adminTriggerStatus_(); },
+  /* エラーログ */
+  errorLogStatus: function () { return adminErrorLogStatus_(); },
+  errorLogTest: function (p, user) { return adminErrorLogTest_(user); },
   /* 手動実行 */
   runReminders: function () {
     var n = sendFlightReminders_();
@@ -250,6 +253,7 @@ function setupSheets_() {
         }
       });
     }
+    report.errorLogCreated = ensureErrorLogSheet_().created;
     var tplIds = readRows_(SHEETS.TEMPLATES).map(function (r) { return String(r['テンプレートID']); });
     DEFAULT_TEMPLATES.forEach(function (t) {
       if (tplIds.indexOf(t.id) === -1) {
@@ -271,6 +275,7 @@ function adminSetupSheets_() {
     '・追加した列：' + (cols.length ? '\n' + cols.join('\n') : 'なし'),
     '・ID管理に追加した設定キー：' + (r.idKeys.join('、') || 'なし'),
     '・追加した通知テンプレート（有効=OFF）：' + (r.templates.join('、') || 'なし'),
+    '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み'),
     '\n既存のデータ・行は変更していません。'
   ];
   if (r.missingSheets.length) msg.unshift('【注意】次のシートが見つかりません（自動作成はしません）：' + r.missingSheets.join('、'));
@@ -490,6 +495,7 @@ function adminDiagnose_(p) {
     return adminCheckLine_({}).message;
   });
   sec('トリガー（独立GAS）', function () { return adminTriggerStatus_().message; });
+  sec('エラーログ', function () { return errorLogSummary_(); });
   sec('送信ログ', function () {
     var rows = readRows_(SHEETS.SEND_LOG);
     var count = {};
@@ -518,13 +524,23 @@ var TRIGGER_REQUEST_TTL_MS = 10 * 60 * 1000;
 /** 時間主導トリガー：搭乗前日リマインド（冪等。何度実行されても1予約1回のみ送信） */
 function triggerFlightReminders() {
   PropertiesService.getScriptProperties().setProperty(TRIGGER_PROPS.LAST_REMINDERS, String(Date.now()));
-  return sendFlightReminders_();
+  try {
+    return sendFlightReminders_();
+  } catch (e) {
+    logError_('trigger.failed', e, { action: 'triggerFlightReminders' });
+    throw e; // 実行履歴にも失敗として残す
+  }
 }
 
 /** 時間主導トリガー：再試行待ち通知の再送（冪等。X-Line-Retry-Key で重複防止） */
 function triggerRetryFailedSends() {
   PropertiesService.getScriptProperties().setProperty(TRIGGER_PROPS.LAST_RETRY, String(Date.now()));
-  return retryFailedSends_();
+  try {
+    return retryFailedSends_();
+  } catch (e) {
+    logError_('trigger.failed', e, { action: 'triggerRetryFailedSends' });
+    throw e;
+  }
 }
 
 /** ID管理シート編集時のキャッシュ破棄（管理メニュー用GAS の onEdit から呼ばれる。値は返さない） */
@@ -656,4 +672,54 @@ function deployedBuildLine_() {
   if (r.build === APP.BUILD) return '【OK】Web アプリは保存済みコードと同じ版です（' + APP.BUILD + '）';
   return '【NG】Web アプリが古い版です（デプロイ済み: ' + (r.build || '版情報なし＝旧コード') + ' / 保存済み: ' + APP.BUILD + '）\n' +
     '  → 本体GASで「デプロイ → デプロイを管理 → 編集 → バージョン: 新バージョン → デプロイ」を実行してください（URL は変わりません）。';
+}
+
+/* ---------- エラーログ（管理メニュー） ---------- */
+
+/** エラーログの件数要約（診断用） */
+function errorLogSummary_() {
+  var sh = getSpreadsheet_().getSheetByName(ERROR_LOG.SHEET);
+  if (!sh) return '【未作成】エラーログシート（「エラーログ設定・動作確認」または「シート列・設定行の補完」で作成）';
+  var rows = readRows_(ERROR_LOG.SHEET);
+  var open = rows.filter(function (r) { return String(r['対応状況'] || '未対応') === '未対応'; });
+  var fatal = open.filter(function (r) { return r['重要度'] === 'FATAL'; }).length;
+  var last = rows.length ? rows[rows.length - 1]['発生日時'] : '';
+  return (open.length ? (fatal ? '【要対応】' : '【確認】') : '【OK】') + '未対応 ' + open.length + ' 件（うち FATAL ' + fatal + ' 件）／全 ' + rows.length + ' 件' +
+    (last ? '\n  最新: ' + cellToString_(last, 'yyyy-MM-dd HH:mm:ss') : '');
+}
+
+/** エラーログの設定確認（シートがなければ作成し、書式を整える。既存の行は変更しない） */
+function adminErrorLogStatus_() {
+  var r = ensureErrorLogSheet_();
+  formatErrorLogSheet_(r.sheet);
+  var lines = [
+    r.created ? '【作成】エラーログシートを新規作成しました' : '【OK】エラーログシートあり',
+    r.addedColumns.length ? '【補完】不足していた列を追加: ' + r.addedColumns.join('、') : '【OK】列構成: ' + ERROR_LOG.HEADERS.join(' / '),
+    '【OK】ヘッダー固定・フィルター・重要度の色分け（FATAL=赤 / ERROR=橙）・対応状況の選択肢を設定',
+    errorLogSummary_(),
+    '',
+    '◆ 記録の仕組み',
+    '・記録するのは logError_（ERROR / FATAL）だけです。INFO・WARN、正常な Webhook 受信・LINE 送信は記録しません。',
+    '・同じエラーは ERROR 10分 / FATAL 1分に1件だけ記録し、省略した件数は次の行に残します。',
+    '・トークン・シークレット・メッセージ本文・LINE ユーザーID・メール・電話番号は記録しません。',
+    '・記録に失敗しても本来の処理（Webhook の HTTP 200 応答など）は止まりません。',
+    '・GAS の実行履歴にある過去のエラーは自動取得できません（Apps Script API はエラー内容を返さないため）。記録対象は今後発生するエラーです。'
+  ];
+  return { ok: true, title: 'エラーログ設定・動作確認', message: lines.join('\n'), data: { sheet: ERROR_LOG.SHEET } };
+}
+
+/** 動作確認用のテストエラーを1件記録（管理者がメニューから明示的に実行したときのみ） */
+function adminErrorLogTest_(user) {
+  var err = new Error('テストエラー（管理メニューの動作確認。対応不要）');
+  var ok = false;
+  try {
+    ok = recordErrorToSheet_('errorlog.test', err, { action: 'errorLogTest' },
+      { noDedup: true, functionName: 'adminErrorLogTest_', sourceSuffix: '動作確認' });
+  } catch (e) {
+    return { ok: false, title: 'テストエラーを記録できませんでした', message: sanitizeErrorText_(e && e.message) };
+  }
+  logInfo_('errorlog.test_written', { by: user ? 'admin' : '' });
+  return { ok: ok, title: 'テストエラーを記録しました',
+    message: '「' + ERROR_LOG.SHEET + '」シートの最終行に、重要度 ERROR・発生元「管理メニュー（動作確認）」の行を1件追加しました。\n' +
+      '確認後は「対応状況」を「対象外」にするか、行を削除してください。' };
 }

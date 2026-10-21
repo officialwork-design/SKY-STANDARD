@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-10-21.3-gas-only',
+  BUILD: '2026-10-21.4-errorlog',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',

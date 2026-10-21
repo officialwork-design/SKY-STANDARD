@@ -59,7 +59,7 @@ function setup(o = {}) {
     console,
     SpreadsheetApp: {
       getUi: () => ui,
-      getActive: () => ({}),
+      getActive: () => ({ getSheetByName: (n) => lib.sheets[n] || null }),
       getActiveSheet: () => {
         const sh = activeSheet.name === '送信ログ' ? sendLog : lib.sheets[activeSheet.name];
         return Object.assign({}, sh, {
@@ -90,6 +90,7 @@ function setup(o = {}) {
     }
     return { getContentText: () => '', getResponseCode: () => 404 };
   } };
+  ctx.Utilities = lib.ctx.Utilities;
   if (o.withLibrary !== false) {
     ctx.SkyStandard = { adminRun: (a, p) => lib.ctx.adminRun(a, p), invalidateIdCacheFromEdit: () => lib.ctx.invalidateIdCacheFromEdit() };
   }
@@ -112,7 +113,7 @@ test('開くと「SKY STANDARD」メニューが1つだけ表示され、指定�
     { name: '初期設定', items: ['シート列・設定行の補完', 'ID・URL設定チェック', 'LINE接続チェック', 'ID管理の変更を反映（再読込）'] },
     { name: 'LINE管理', items: ['リッチメニュー登録・更新', 'リッチメニュー設定確認', '今月の配信数確認'] },
     { name: '予約・通知', items: ['承認待ち通知を送信（選択中の行）', '選択中の通知を却下', '失敗した通知を再送', '通知テンプレート確認'] },
-    { name: 'システム管理', items: ['トリガー設定', 'トリガー状態確認', '接続・設定診断'] }
+    { name: 'システム管理', items: ['トリガー設定', 'トリガー状態確認', '接続・設定診断', 'エラーログを開く', 'エラーログ設定・動作確認'] }
   ]);
 });
 
@@ -273,4 +274,41 @@ test('LINE接続チェック（疎通テストなし）', () => {
   s.ctx.skyMenuCheckLine();
   assert.match(s.last().msg, /アカウント名: SKY STANDARD/);
   assert.equal(s.lib.fetchCalls.filter((c) => /webhook\/test/.test(c.url)).length, 0);
+});
+
+/* ---------- エラーログ ---------- */
+
+test('エラーログを開く：未作成なら作成方法を案内、作成済みなら開く', () => {
+  const s = setup();
+  s.ctx.skyMenuOpenErrorLog();
+  assert.match(s.last().msg, /エラーログ設定・動作確認/);
+  s.lib.ctx.logError_('faq.read', new Error('x'));
+  s.ctx.skyMenuOpenErrorLog();
+  assert.equal(s.lib.sheets['エラーログ'].fmt.activated, true);
+});
+
+test('エラーログ設定・動作確認：「いいえ」ならテスト行を書かない、「はい」で1件だけ記録', () => {
+  const s = setup({ answers: ['NO'] });
+  s.ctx.skyMenuErrorLogCheck();
+  assert.ok(s.shown.some((m) => /エラーログ設定・動作確認/.test(m.title)));
+  assert.equal(s.lib.rows('エラーログ').length, 0);
+  s.answers.push('YES');
+  s.ctx.skyMenuErrorLogCheck();
+  const rows = s.lib.rows('エラーログ');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]['発生元'], '管理メニュー（動作確認）');
+  assert.equal(s.lib.sheets['エラーログ'].fmt.activated, true);
+});
+
+test('ライブラリ呼び出し自体が失敗したら、管理メニュー側でエラーログに記録（シートがある場合のみ）', () => {
+  const s = setup();
+  s.lib.ctx.adminRun('errorLogStatus'); // シート作成
+  s.ctx.SkyStandard = { adminRun: () => { throw new Error('Library not found for user taro@example.com'); } };
+  s.ctx.skyMenuCheckIds();
+  assert.match(s.last().title, /実行エラー/);
+  const rows = s.lib.rows('エラーログ');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]['発生元'], '管理メニュー（ライブラリ呼び出し）');
+  assert.equal(rows[0]['関数名'], 'call_:checkIds');
+  assert.doesNotMatch(rows[0]['エラーメッセージ'], /taro@example\.com/);
 });

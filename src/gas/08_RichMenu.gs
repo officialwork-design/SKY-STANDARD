@@ -87,7 +87,10 @@ function deployRichMenu_() {
     lineFetch_('post', '/v2/bot/user/all/richmenu/' + richMenuId);
   } catch (e) {
     // 途中失敗時は作成したメニューを削除して元の状態を維持
-    try { lineFetch_('delete', '/v2/bot/richmenu/' + richMenuId); } catch (e2) { /* noop */ }
+    try { lineFetch_('delete', '/v2/bot/richmenu/' + richMenuId); } catch (e2) {
+      // 作成途中のリッチメニューが LINE 側に残る（管理者の確認が必要）
+      logError_('richmenu.rollback_failed', e2, { id: richMenuId });
+    }
     throw e;
   }
   if (oldDefault && oldDefault !== richMenuId) {

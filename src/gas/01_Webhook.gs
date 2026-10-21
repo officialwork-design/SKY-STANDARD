@@ -264,7 +264,12 @@ function processLineEvents_(events, trust) {
       dispatchEvent_(ev);
       handled++;
     } catch (err) {
-      logError_('webhook.event_failed', err, { type: ev.type, verified: __eventTrust.verified });
+      if (!__eventTrust.verified && err instanceof LineApiError && err.status === 400 && /Invalid reply token/i.test(String(err.body || ''))) {
+        // 未検証イベントの応答トークンが LINE に拒否された＝偽造・期限切れの可能性。システムエラーではないため警告のみ
+        logWarn_('webhook.unverified_reply_rejected', { type: ev.type });
+      } else {
+        logError_('webhook.event_failed', err, { type: ev.type, verified: __eventTrust.verified });
+      }
       // 利用者へ未応答かつ一時的な失敗なら登録を解除し、LINE の再送で再処理できるようにする。
       // （応答済み、または 400 等の恒久エラーは再処理しても改善しないため解除しない）
       var permanent = (err instanceof LineApiError && !err.retryable) || err instanceof ConfigError;

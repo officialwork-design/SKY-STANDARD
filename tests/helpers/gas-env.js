@@ -65,12 +65,30 @@ function fmtDate(date, tz, fmt) {
 }
 
 function createSheet(name, data) {
+  const fmt = { frozenRows: 0, filter: null, rules: [], validations: [], widths: {}, headerStyle: {} };
   const sheet = {
     data,
+    fmt,
     getName: () => name,
+    getMaxRows: () => 1000,
+    setFrozenRows(n) { fmt.frozenRows = n; },
+    getFilter: () => fmt.filter,
+    getConditionalFormatRules: () => fmt.rules.slice(),
+    setConditionalFormatRules(rs) { fmt.rules = rs.slice(); },
+    setColumnWidth(c, w) { fmt.widths[c] = w; },
+    activate() { fmt.activated = true; },
+    setActiveRange() {},
     getLastRow: () => data.length,
     getLastColumn: () => data.reduce((m, r) => Math.max(m, r.length), 0),
     getRange(row, col, nr = 1, nc = 1) {
+      if (typeof row === 'string') {
+        // A1 表記（例 'A2:H' / 'H2:H'）。行数を省略した列範囲は 1000 行として扱う
+        const m = row.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d*))?$/);
+        const colNum = (L) => L.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+        const r1 = Number(m[2]); const c1 = colNum(m[1]); const c2 = m[3] ? colNum(m[3]) : c1;
+        const r2 = m[4] ? Number(m[4]) : 1000;
+        return sheet.getRange(r1, c1, r2 - r1 + 1, c2 - c1 + 1);
+      }
       return {
         getValues() {
           const out = [];
@@ -93,7 +111,21 @@ function createSheet(name, data) {
           while (r.length < col) r.push('');
           r[col - 1] = v;
         },
-        getRow: () => row
+        getRow: () => row,
+        setValues(vals) {
+          vals.forEach((line, i) => {
+            while (data.length < row + i) data.push([]);
+            const rr = data[row - 1 + i];
+            line.forEach((v, j) => { while (rr.length < col + j) rr.push(''); rr[col - 1 + j] = v; });
+          });
+          return this;
+        },
+        setFontWeight(w) { if (row === 1) fmt.headerStyle.bold = w; return this; },
+        setBackground(c) { if (row === 1) fmt.headerStyle.bg = c; return this; },
+        setFontColor() { return this; },
+        createFilter() { fmt.filter = { row, col, nr, nc, remove() { fmt.filter = null; }, getRange: () => ({ getNumColumns: () => nc }) }; return fmt.filter; },
+        setDataValidation(v) { fmt.validations.push({ col, v }); return this; },
+        __range: { row, col, nr, nc }
       };
     },
     appendRow(arr) { data.push(arr.slice()); }
@@ -119,6 +151,7 @@ function createGasEnv(opts = {}) {
   const env = { user: opts.user === undefined ? 'owner@example.com' : opts.user };
   const ss = {
     getSheetByName: (n) => sheets[n] || null,
+    insertSheet: (n) => { if (opts.failInsert) throw new Error('insert failed'); sheetsData[n] = []; sheets[n] = createSheet(n, sheetsData[n]); return sheets[n]; },
     getSpreadsheetTimeZone: () => 'Asia/Tokyo',
     getId: () => '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es',
     getOwner: () => ({ getEmail: () => opts.owner || 'owner@example.com' })
@@ -133,7 +166,23 @@ function createGasEnv(opts = {}) {
     },
     Date, JSON, Math, Object, Array, String, Number, Error, RegExp, Intl, isFinite, parseInt, parseFloat,
     encodeURIComponent, decodeURIComponent,
-    SpreadsheetApp: { getActiveSpreadsheet: () => (opts.noActive ? null : ss), openById: () => ss, getUi: () => { throw new Error('no ui'); } },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => (opts.noActive ? null : ss), openById: () => ss, getUi: () => { throw new Error('no ui'); },
+      newConditionalFormatRule: () => {
+        const rule = {};
+        const b = {
+          whenFormulaSatisfied(f) { rule.formula = f; return b; }, setBackground(c) { rule.bg = c; return b; },
+          setFontColor() { return b; }, setRanges(r) { rule.ranges = r; return b; },
+          build() { return Object.assign({}, rule, { getBooleanCondition: () => ({ getCriteriaValues: () => [rule.formula] }) }); }
+        };
+        return b;
+      },
+      newDataValidation: () => {
+        const v = {};
+        const b = { requireValueInList(l) { v.list = l; return b; }, setAllowInvalid() { return b; }, build() { return v; } };
+        return b;
+      }
+    },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (k in props ? props[k] : null),

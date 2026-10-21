@@ -15,6 +15,7 @@
 var MENU_NAME = 'SKY STANDARD';
 var SEND_LOG_SHEET = '送信ログ';
 var ID_SHEET = 'ID管理';
+var ERROR_LOG_SHEET = 'エラーログ';
 
 /* ---------- メニュー ---------- */
 
@@ -43,7 +44,10 @@ function buildMenu_() {
     .addSubMenu(ui.createMenu('システム管理')
       .addItem('トリガー設定', 'skyMenuInstallTriggers')
       .addItem('トリガー状態確認', 'skyMenuTriggerStatus')
-      .addItem('接続・設定診断', 'skyMenuDiagnose'))
+      .addItem('接続・設定診断', 'skyMenuDiagnose')
+      .addSeparator()
+      .addItem('エラーログを開く', 'skyMenuOpenErrorLog')
+      .addItem('エラーログ設定・動作確認', 'skyMenuErrorLogCheck'))
     .addToUi();
 }
 
@@ -60,6 +64,7 @@ function call_(action, params) {
     var res = SkyStandard.adminRun(action, params || {});
     return res || { ok: false, title: 'エラー', message: '結果が返りませんでした。' };
   } catch (e) {
+    recordLocalError_('call_:' + action, e);
     return { ok: false, title: '実行エラー', message: (e && e.message ? e.message : String(e)) +
       '\n\nライブラリへのアクセス権（開発モードでは独立GASの編集権限が必要）と、初回認証が完了しているか確認してください。' };
   }
@@ -244,6 +249,57 @@ function cleanupLocalTriggers_() {
 function skyMenuTriggerStatus() { return run_('triggerStatus'); }
 
 function skyMenuDiagnose() { return run_('diagnose'); }
+
+/* ---------- エラーログ ---------- */
+
+/** エラーログシートを開く（なければ作成を案内） */
+function skyMenuOpenErrorLog() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(ERROR_LOG_SHEET);
+  if (!sh) {
+    return show_({ ok: false, title: 'エラーログがありません',
+      message: '「' + ERROR_LOG_SHEET + '」シートはまだ作成されていません。\n「システム管理 → エラーログ設定・動作確認」を実行すると作成されます。' });
+  }
+  sh.activate();
+  var last = sh.getLastRow();
+  if (last > 1) sh.setActiveRange(sh.getRange(last, 1));
+}
+
+/** エラーログの設定確認（シート作成・書式）と、任意でテストエラーを1件記録 */
+function skyMenuErrorLogCheck() {
+  var st = call_('errorLogStatus');
+  if (!st.ok) return show_(st);
+  show_(st);
+  if (!confirm_('動作確認', '動作確認用のテストエラーを1件、「' + ERROR_LOG_SHEET + '」シートに記録しますか？\n（重要度 ERROR・発生元「管理メニュー（動作確認）」として記録されます）')) return;
+  var r = call_('errorLogTest');
+  show_(r);
+  if (r.ok) skyMenuOpenErrorLog();
+}
+
+/**
+ * ライブラリ（本体GAS）自体を呼び出せなかった場合のエラーを、このスプレッドシートのエラーログに直接記録する。
+ * （ライブラリ側の logError_ が使えないため。シートがなければ作成せず、記録失敗は無視）
+ */
+function recordLocalError_(where, e) {
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(ERROR_LOG_SHEET);
+    if (!sh) return;
+    var msg = String(e && e.message ? e.message : e)
+      .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/g, 'Bearer [REDACTED]')
+      .replace(/[UCR][0-9a-f]{32}/g, '[LINE_ID]')
+      .replace(/([?&](?:token|id_token|access_token|key|code|lineUserId)=)[^&\s"']+/gi, '$1[REDACTED]')
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[EMAIL]')
+      .replace(/(?<![\w-])(\+?81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}(?![\w-])/g, '[PHONE]')
+      .substring(0, 500);
+    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    var v = {
+      '発生日時': Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'),
+      '重要度': 'ERROR', '発生元': '管理メニュー（ライブラリ呼び出し）', '関数名': where,
+      'エラーメッセージ': msg, 'エラー詳細・スタックトレース': 'ライブラリ SkyStandard の呼び出しに失敗（権限・ライブラリ設定・初回認証を確認）',
+      '関連ID': '', '対応状況': '未対応'
+    };
+    sh.appendRow(headers.map(function (h) { var x = v.hasOwnProperty(h) ? v[h] : ''; return /^[=+\-@]/.test(x) ? "'" + x : x; }));
+  } catch (err) { /* 記録失敗は無視 */ }
+}
 
 /* ---------- 編集検知（シンプルトリガー） ---------- */
 
