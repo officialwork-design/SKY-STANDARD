@@ -229,7 +229,7 @@ test('問い合わせ: 種別選択 → 内容入力 → 保存・受付返信�
   env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   send(env, textEvent('お問い合わせ'));
   const cats = lastReply(env).messages[0].quickReply.items.map((i) => i.action.label);
-  assert.deepEqual(cats, ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ']);
+  assert.deepEqual(cats, ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ', 'オペレーターに相談']);
 
   send(env, postbackEvent('a=inq_cat&c=4'));
   assert.match(replyText(env), /チャーター見積/);

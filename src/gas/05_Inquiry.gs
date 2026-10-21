@@ -9,6 +9,9 @@
  * 対応期限（○時間以内など）は営業時間が確定するまで約束しない。
  */
 
+/** 種別選択に表示する有人対応の項目 */
+var OPERATOR_MENU_LABEL = 'オペレーターに相談';
+
 var INQUIRY_CATEGORIES = {
   '1': { label: 'フライト予約について', important: false },
   '2': { label: '予約内容の確認・変更', important: true },
@@ -23,8 +26,11 @@ function buildInquiryCategoryMessage_() {
     var label = INQUIRY_CATEGORIES[k].label;
     return postbackAction_(label, 'a=inq_cat&c=' + k, label);
   });
+  // 有人対応（12_Operator.gs）。選択すると担当者が LINE のチャット画面から返信し、その間は自動応答を停止する
+  items.push(postbackAction_(OPERATOR_MENU_LABEL, 'a=inq_operator', OPERATOR_MENU_LABEL));
   return withQuickReply_('お問い合わせありがとうございます。\nお問い合わせの種類を下から選択してください。\n\n' +
-    Object.keys(INQUIRY_CATEGORIES).map(function (k) { return k + '. ' + INQUIRY_CATEGORIES[k].label; }).join('\n'), items);
+    Object.keys(INQUIRY_CATEGORIES).map(function (k) { return k + '. ' + INQUIRY_CATEGORIES[k].label; }).join('\n') +
+    '\n\n担当者と直接やりとりしたい場合は「' + OPERATOR_MENU_LABEL + '」を選択してください。', items);
 }
 
 function getInquiryState_(userId) {

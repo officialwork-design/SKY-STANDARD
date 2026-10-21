@@ -307,6 +307,11 @@ function claimEvent_(eventId) {
 
 function dispatchEvent_(ev) {
   var userId = ev.source && ev.source.userId;
+  // オペレーター対応モード中（1対1トーク）は一切自動返信しない。ブロック（unfollow）の記録のみ通常どおり行う。
+  // 「対応完了」になっていればここで解除され、通常の自動応答に戻る（12_Operator.gs）
+  if (userId && ev.source.type === 'user' && ev.type !== 'unfollow' && isOperatorMode_(userId)) {
+    return handleOperatorModeEvent_(ev, userId);
+  }
   switch (ev.type) {
     case 'follow':
       return handleFollow_(ev, userId);
@@ -387,6 +392,8 @@ function handlePostback_(ev, userId, data) {
       return r;
     case 'inq_handoff':
       return handoffLastMessage_(ev, userId);
+    case 'inq_operator':
+      return startOperatorHandoff_(ev, userId);
     case 'faq':
       return replyMessage_(ev.replyToken, buildFaqAnswerById_(p.id));
     case 'faq_list':

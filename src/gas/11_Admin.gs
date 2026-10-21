@@ -187,6 +187,9 @@ var ADMIN_ACTIONS = {
   /* エラーログ */
   errorLogStatus: function () { return adminErrorLogStatus_(); },
   errorLogTest: function (p, user) { return adminErrorLogTest_(user); },
+  /* オペレーター対応（12_Operator.gs） */
+  operatorStatus: function () { return adminOperatorStatus_(); },
+  operatorRelease: function (p) { return adminOperatorRelease_(p.inquiryId); },
   /* 手動実行 */
   runReminders: function () {
     var n = sendFlightReminders_();
@@ -254,6 +257,7 @@ function setupSheets_() {
       });
     }
     report.errorLogCreated = ensureErrorLogSheet_().created;
+    if (report.missingSheets.indexOf(SHEETS.INQUIRIES) === -1) report.inquiryStatusValidation = ensureInquiryStatusValidation_();
     var tplIds = readRows_(SHEETS.TEMPLATES).map(function (r) { return String(r['テンプレートID']); });
     DEFAULT_TEMPLATES.forEach(function (t) {
       if (tplIds.indexOf(t.id) === -1) {
@@ -276,6 +280,7 @@ function adminSetupSheets_() {
     '・ID管理に追加した設定キー：' + (r.idKeys.join('、') || 'なし'),
     '・追加した通知テンプレート（有効=OFF）：' + (r.templates.join('、') || 'なし'),
     '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み'),
+    '・問い合わせ管理「対応状況」の選択肢（未対応／対応中／対応完了）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
     '\n既存のデータ・行は変更していません。'
   ];
   if (r.missingSheets.length) msg.unshift('【注意】次のシートが見つかりません（自動作成はしません）：' + r.missingSheets.join('、'));
@@ -350,6 +355,8 @@ function adminCheckLine_(p) {
     PropertiesService.getScriptProperties().setProperty(PROP_KEYS.BOT_USER_ID, info.userId);
   }
   lines.push('【情報】Webhook 受信方式: ' + (mode === WEBHOOK_MODES.DIRECT ? 'GAS単体（direct・署名検証なし）' : 'リレー経由（relay・署名検証あり）'));
+  if (info.chatMode === 'chat') lines.push('【OK】チャット: オン（オペレーター対応で、担当者がチャット画面から返信できます）');
+  else if (info.chatMode === 'bot') lines.push('【要確認】チャット: オフ。オペレーター対応（「オペレーターに相談」）を使う場合は、LINE Official Account Manager → 応答設定で「チャット」をオンにしてください（Webhook はオンのまま）');
   lines.push(deployedBuildLine_());
 
   var gasUrl = getSetting_(ID_KEYS.GAS_WEBAPP_URL);

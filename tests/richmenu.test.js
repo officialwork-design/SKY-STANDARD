@@ -144,7 +144,7 @@ test('リッチメニューの「お問い合わせ」「よくある質問」�
   const e = env();
   e.doPost(relayEnvelope({ destination: BOT, events: [{ type: 'message', webhookEventId: 'q1', replyToken: 'rt1', source: { type: 'user', userId: USER }, message: { type: 'text', text: 'お問い合わせ' } }] }, 'r'));
   let r = e.linePosts('/v2/bot/message/reply').pop().json.messages[0];
-  assert.deepEqual(r.quickReply.items.map((i) => i.action.label), ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ']);
+  assert.deepEqual(r.quickReply.items.map((i) => i.action.label), ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ', 'オペレーターに相談']);
   e.doPost(relayEnvelope({ destination: BOT, events: [{ type: 'message', webhookEventId: 'q2', replyToken: 'rt2', source: { type: 'user', userId: USER }, message: { type: 'text', text: 'FAQ' } }] }, 'r'));
   r = e.linePosts('/v2/bot/message/reply').pop().json.messages[0];
   assert.match(r.text, /よくある質問/);

@@ -187,7 +187,8 @@ function createGasEnv(opts = {}) {
       getScriptProperties: () => ({
         getProperty: (k) => (k in props ? props[k] : null),
         setProperty: (k, v) => { props[k] = String(v); },
-        deleteProperty: (k) => { delete props[k]; }
+        deleteProperty: (k) => { delete props[k]; },
+        getProperties: () => Object.assign({}, props)
       })
     },
     CacheService: {

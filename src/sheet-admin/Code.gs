@@ -16,6 +16,7 @@ var MENU_NAME = 'SKY STANDARD';
 var SEND_LOG_SHEET = '送信ログ';
 var ID_SHEET = 'ID管理';
 var ERROR_LOG_SHEET = 'エラーログ';
+var INQUIRY_SHEET = '問い合わせ管理';
 
 /* ---------- メニュー ---------- */
 
@@ -41,6 +42,9 @@ function buildMenu_() {
       .addItem('選択中の通知を却下', 'skyMenuRejectSelected')
       .addItem('失敗した通知を再送', 'skyMenuRetry')
       .addItem('通知テンプレート確認', 'skyMenuTemplates'))
+    .addSubMenu(ui.createMenu('お問い合わせ')
+      .addItem('オペレーター対応状況', 'skyMenuOperatorStatus')
+      .addItem('オペレーター対応を終了（選択中の行）', 'skyMenuOperatorRelease'))
     .addSubMenu(ui.createMenu('システム管理')
       .addItem('トリガー設定', 'skyMenuInstallTriggers')
       .addItem('トリガー状態確認', 'skyMenuTriggerStatus')
@@ -138,9 +142,14 @@ function skyMenuQuota() { return run_('quota'); }
 
 /** 送信ログで選択中の1行の送信IDを取得（エラー時は表示して null） */
 function selectedSendId_() {
+  return selectedRowValue_(SEND_LOG_SHEET, '送信ID');
+}
+
+/** 指定シートで選択中の1行から、指定列の値を取得（エラー時は表示して null） */
+function selectedRowValue_(sheetName, colName) {
   var sheet = SpreadsheetApp.getActiveSheet();
-  if (sheet.getName() !== SEND_LOG_SHEET) {
-    show_({ ok: false, title: '行を選択してください', message: '「' + SEND_LOG_SHEET + '」シートで対象の行を1行だけ選択してから実行してください。' });
+  if (sheet.getName() !== sheetName) {
+    show_({ ok: false, title: '行を選択してください', message: '「' + sheetName + '」シートで対象の行を1行だけ選択してから実行してください。' });
     return null;
   }
   var range = sheet.getActiveRange();
@@ -150,14 +159,14 @@ function selectedSendId_() {
   }
   var row = range.getRow();
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-  var col = headers.indexOf('送信ID');
+  var col = headers.indexOf(colName);
   if (row < 2 || col === -1) {
     show_({ ok: false, title: '行を選択してください', message: 'データ行（2行目以降）を選択してください。' });
     return null;
   }
   var id = String(sheet.getRange(row, col + 1).getValue() || '').trim();
   if (!id) {
-    show_({ ok: false, title: '送信IDがありません', message: '選択した行に送信IDがありません。' });
+    show_({ ok: false, title: colName + 'がありません', message: '選択した行に' + colName + 'がありません。' });
     return null;
   }
   return id;
@@ -197,6 +206,23 @@ function skyMenuRetry() {
 }
 
 function skyMenuTemplates() { return run_('templates'); }
+
+/* ---------- お問い合わせ（オペレーター対応） ---------- */
+
+function skyMenuOperatorStatus() { return run_('operatorStatus'); }
+
+/**
+ * 選択中の問い合わせのオペレーター対応を終了し、自動応答を再開する。
+ * 通常は「対応状況」を「対応完了」にするだけでよい（次の受信時に自動で解除）。
+ * こちらは行が見つからない等で自動解除されない場合や、すぐに解除したい場合に使う。
+ */
+function skyMenuOperatorRelease() {
+  var id = selectedRowValue_(INQUIRY_SHEET, '受付ID');
+  if (!id) return;
+  if (!confirm_('オペレーター対応を終了', id + ' のオペレーター対応を終了し、この利用者への自動応答を再開します。\n' +
+    '対応状況が「対応完了」でない場合は「対応完了」に更新します（利用者へのメッセージ送信は行いません）。\nよろしいですか？')) return;
+  return run_('operatorRelease', { inquiryId: id });
+}
 
 /* ---------- システム管理・トリガー ---------- */
 

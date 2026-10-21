@@ -99,6 +99,7 @@ var ERROR_SOURCES = [
   [/^line\.|^richmenu\./, 'LINE API'],
   [/^faq\./, 'FAQ'],
   [/^inquiry\./, '問い合わせ'],
+  [/^operator\./, 'オペレーター対応'],
   [/^customer\./, '顧客管理'],
   [/^liff\.|^reservation/, '予約'],
   [/^notify\.|^template\.|^sendlog\.|^reminder\./, '通知'],
