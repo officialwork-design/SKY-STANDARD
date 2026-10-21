@@ -40,6 +40,21 @@ function markCustomerUnfollowed_(userId) {
   });
 }
 
+/**
+ * 友だち関係の確認（プロフィール API）。
+ * @return {'friend'|'not_friend'|'unknown'} 404 は「友だちでない（ブロック・未追加）」
+ */
+function checkFriendship_(userId) {
+  try {
+    lineFetch_('get', '/v2/bot/profile/' + encodeURIComponent(userId));
+    return 'friend';
+  } catch (e) {
+    if (e instanceof LineApiError && e.status === 404) return 'not_friend';
+    logWarn_('line.friendship_unknown', { userId: userId, status: e.status });
+    return 'unknown';
+  }
+}
+
 /** プッシュ送信可能か（ブロック中は送らない。未登録は送信可として扱う） */
 function isPushAllowed_(userId) {
   if (!userId) return false;

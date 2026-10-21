@@ -1,5 +1,8 @@
 /**
- * LINE Webhook 署名検証リレー（Cloud Run 等で稼働）
+ * LINE Webhook 署名検証リレー（任意構成・旧構成。Cloud Run 等で稼働）
+ *
+ * ※ 標準構成は GAS単体（LINE → GAS Web アプリ直接。docs/gas-only.md）で、このリレーは不要。
+ *    署名検証が必要になった場合のみデプロイし、GAS のスクリプトプロパティ WEBHOOK_MODE=relay を設定する。
  *
  * GAS Web アプリは HTTP ヘッダー（X-Line-Signature）を参照できないため、
  * このリレーで LINE の署名を検証し、共有シークレットで HMAC 署名した封筒に包んで GAS へ転送する。

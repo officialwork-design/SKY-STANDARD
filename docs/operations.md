@@ -40,11 +40,12 @@
 1. **メニュー「システム管理 → 接続・設定診断」「初期設定 → ID・URL設定チェック」** — 未設定・形式エラー・秘密情報のシート入力がないか。
 2. **GAS 実行ログ** — エディタ左の「実行数」。`level: ERROR` の `event` を確認。
    - `config.missing`: スクリプトプロパティ不足
-   - `webhook.bad_signature`: リレーと GAS の `RELAY_SHARED_SECRET` 不一致
-   - `webhook.stale`: リレーと GAS の時刻ずれ／転送遅延
+   - `webhook.invalid_event` / `webhook.invalid_destination` / `webhook.destination_mismatch`: 形式不正・宛先違いの受信（偽造の可能性。処理はしていません）
+   - `webhook.unfollow_unconfirmed`: 未確認のブロック通知を無視
+   - （relay のみ）`webhook.bad_signature` / `webhook.stale`: リレーと GAS の鍵不一致・時刻ずれ
    - `webhook.event_failed`: 応答失敗（`Invalid reply token` は応答期限切れ）
    - `notify.push_failed`: 通知失敗（送信ログに詳細）
-3. **リレーのログ**（Cloud Run → ログ）
+3. （relay のみ）**リレーのログ**（Cloud Run → ログ）
    - `relay.bad_signature`: LINE の Webhook URL / チャネルシークレットの不一致
    - `relay.forward_failed`: GAS_WEBAPP_URL の誤り・GAS 障害
 4. **LINE Developers** — Webhook の「検証」、「統計情報」のエラー率。
@@ -59,4 +60,4 @@
 
 - アクセストークン・シークレットは定期的にローテーション（GAS プロパティとリレーの Secret を同時更新）。
 - スプレッドシートの共有範囲は運営メンバーに限定（顧客の LINE ユーザーID・問い合わせ内容を含むため）。
-- `ALLOW_UNSIGNED_WEBHOOK` は本番で設定しない。
+- GAS単体構成では Webhook の送信元を検証できません。Web アプリの URL を不用意に公開しない（ただし秘密にしても署名検証の代わりにはならない）。不審な受信が増えたら「接続・設定診断」と実行ログを確認する。

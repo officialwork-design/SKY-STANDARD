@@ -3,7 +3,7 @@
 | 種類 | 保存先 | 例 |
 |---|---|---|
 | 公開可能な ID・URL | スプレッドシート **「ID管理」シート B列** | LIFF_ID, BOOKING_SITE_URL |
-| 秘密情報 | **独立GASのスクリプトプロパティ**（リレーは Cloud Run Secret Manager） | LINE_CHANNEL_ACCESS_TOKEN |
+| 秘密情報 | **本体GASのスクリプトプロパティ** | LINE_CHANNEL_ACCESS_TOKEN |
 | 起動用 | 独立GASのスクリプトプロパティ `SPREADSHEET_ID` | （ID管理にも確認用の写しあり） |
 
 秘密情報はシートにも GitHub にも保存しないでください。ID管理シートに秘密情報の値が入っていても、システムは読み込みません（「ID・URL設定チェック」で【危険】と表示します）。
@@ -13,14 +13,14 @@
 ### 1-1. Messaging API チャネル（公式アカウント）
 
 1. LINE Developers コンソールでプロバイダー「SKY STANDARD」を選択し、Messaging API チャネルを開く。
-2. 「チャネル基本設定」→ **チャネルシークレット** を控える（リレーの `LINE_CHANNEL_SECRET`）。
+2. （任意構成のリレーを使う場合のみ）「チャネル基本設定」→ チャネルシークレットを控える。GAS単体構成では使いません。
 3. 「Messaging API設定」→ **チャネルアクセストークン（長期）** を発行（GAS の `LINE_CHANNEL_ACCESS_TOKEN`）。
 4. LINE Official Account Manager → 応答設定:
    - 応答モード: **Bot**
    - あいさつメッセージ: **オフ**（GAS が送信するため。二重送信防止）
    - 応答メッセージ（自動応答）: **オフ**
    - Webhook: **オン**
-5. Webhook URL はリレーをデプロイ後に設定（[deployment.md](deployment.md) の 3 章）。「Webhookの再送」はオンを推奨（重複は GAS 側で排除）。
+5. Webhook URL に ID管理の `GAS_WEBAPP_URL`（GAS Web アプリの URL）を指定します（GAS単体構成）。「Webhookの再送」はどちらでも構いません（GAS は 200 を返し、重複は GAS 側で排除）。署名検証の制約は [gas-only.md](gas-only.md) を参照。
 
 ### 1-2. LINE ログインチャネル（LIFF 用）
 
@@ -49,7 +49,7 @@ A列「設定キー」・B列「設定値」を読み込みます（C〜E列は�
 | `GAS_SCRIPT_ID` | 独立GASのスクリプトID（管理用） | 英数字 | — |
 | `LINE_LOGIN_CHANNEL_ID` | LINE ログインのチャネルID | 数字 | 予約確認（ID トークン検証） |
 | `LIFF_ID` | 予約確認 LIFF ID | `1234567890-xxxx` | 予約確認・リッチメニュー |
-| `GAS_WEBAPP_URL` | GAS Web アプリ URL | `https://script.google.com/macros/s/…/exec` | リレー転送先・LIFF の API |
+| `GAS_WEBAPP_URL` | GAS Web アプリ URL | `https://script.google.com/macros/s/…/exec` | LINE の Webhook URL・LIFF の API・トリガー設定 |
 | `BOOKING_SITE_URL` | フライト予約ページ | `https://` | リッチメニュー・自動応答 |
 | `BOOKING_CONFIRM_URL` | 本人認証付き予約確認ページ（LIFF を使わない場合） | `https://` | リッチメニュー |
 | `PLAN_LIST_URL` | プラン一覧ページ | `https://` | リッチメニュー・自動応答 |
@@ -80,13 +80,13 @@ A列「設定キー」・B列「設定値」を読み込みます（C〜E列は�
 | `SPREADSHEET_ID` | ◎ | 起動用。管理メニューの「シート列・設定行の補完」で自動設定されます |
 | `ADMIN_USERS` | ◎ | 管理メニューを操作できる人のメールアドレス（カンマ区切り）。**未設定の間は誰も操作できません**。最初に登録してください |
 | `LINE_CHANNEL_ACCESS_TOKEN` | ◎ | Messaging API チャネルアクセストークン |
-| `RELAY_SHARED_SECRET` | ◎ | リレーと共有するランダム文字列（32文字以上） |
+| `WEBHOOK_MODE` | 任意 | `direct`（既定・GAS単体）／`relay`（署名検証リレー経由） |
+| `RELAY_SHARED_SECRET` | relay のみ | リレーと共有するランダム文字列（32文字以上）。GAS単体では不要 |
 | `RESERVATION_WEBHOOK_SECRET` | 予約通知 | 予約サイトと共有する署名用シークレット |
 | `RESERVATION_API_KEY` | API 利用時 | 予約サイト API の Bearer キー |
 | `RESERVATION_API_ALLOWED_HOST` | API 利用時 | API キーを送ってよいホスト名（例 `api.example.jp`）。ID管理の URL と一致しない場合は送信しません |
 | `ADMIN_EMAIL` | 任意 | 運営通知メールの宛先 |
-| `LINE_CHANNEL_SECRET` | 任意 | 参照用（署名検証はリレーで実施） |
-| `ALLOW_UNSIGNED_WEBHOOK` | 開発のみ | `true` で署名なし直結を許可。**本番では設定しない** |
+| `LINE_CHANNEL_SECRET` | 任意 | 参照用（GAS単体では署名検証に使えません） |
 
 ランダム文字列の生成例: `openssl rand -base64 48`
 

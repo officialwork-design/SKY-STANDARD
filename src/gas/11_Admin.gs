@@ -308,6 +308,7 @@ function adminCheckIds_() {
       '\n（システムはシート上の秘密情報を読み込みません）' : '') +
     (legacy.length ? '\n\n【移行が必要】旧「LINE設定」シートに値があり、ID管理シートが空の項目：' + legacy.join('、') : '') +
     '\n\n◆ 機能ごとの不足設定\n' + (missingByFeature.length ? missingByFeature.join('\n') : 'すべての必須設定が入力済みです。') +
+    (cfg.warnings.length ? '\n\n◆ 注意（障害ではありません）\n・' + cfg.warnings.join('\n・') : '') +
     '\n\n（ID管理シートの最新値を読み込み、設定キャッシュを更新しました）';
   return { ok: cfg.ok && !danger.length, title: 'ID・URL設定チェック', message: msg };
 }
@@ -324,34 +325,76 @@ function legacySettingsNotMigrated_(idMap) {
   return out;
 }
 
-/** LINE 接続チェック（Bot 情報・Webhook 設定・配信数。Webhook 疎通テストは任意） */
+/**
+ * LINE 接続チェック。
+ *   - トークン有効性・アカウント情報（ボットのユーザーIDを BOT_USER_ID に保存）
+ *   - Webhook 設定（LINE 側に登録された URL と、受信方式に応じた期待値の比較）
+ *   - 任意：Webhook 疎通テスト。LINE が報告した HTTP ステータスと、GAS 側で実際に受信できたか
+ *     （受信記録の更新）を分けて表示する。302 は「GAS は実行されたが LINE は失敗扱い」。
+ */
 function adminCheckLine_(p) {
   if (!getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN)) {
     throw new ConfigError('LINE_CHANNEL_ACCESS_TOKEN（スクリプトプロパティ）が未設定のため、LINE に接続できません。', ['LINE_CHANNEL_ACCESS_TOKEN']);
   }
   var lines = [];
+  var mode = getWebhookMode_();
   var info = lineFetch_('get', '/v2/bot/info').body;
   lines.push('【OK】チャネルアクセストークン有効');
   lines.push('  アカウント名: ' + (info.displayName || '-') + ' / ベーシックID: ' + (info.basicId || '-'));
-  try {
-    var wh = lineFetch_('get', '/v2/bot/channel/webhook/endpoint').body;
-    var expected = /\/webhook$/.test(wh.endpoint || '');
-    lines.push((wh.active ? '【OK】' : '【要確認】') + 'Webhook 利用: ' + (wh.active ? 'オン' : 'オフ'));
-    lines.push((wh.endpoint ? (expected ? '【OK】' : '【要確認】') : '【未設定】') + 'Webhook URL: ' + (wh.endpoint || '未設定') +
-      (wh.endpoint && /script\.google\.com/.test(wh.endpoint) ? '\n  ※ GAS の URL を直接指定すると署名検証できず拒否されます。リレーの /webhook を指定してください。' : ''));
-    if (p && p.testWebhook && wh.endpoint) {
-      var t = lineFetch_('post', '/v2/bot/channel/webhook/test', { endpoint: wh.endpoint }).body;
-      lines.push((t.success ? '【OK】' : '【NG】') + 'Webhook 疎通テスト: ' + (t.success ? '成功' : '失敗') +
-        (t.statusCode ? '（HTTP ' + t.statusCode + (t.reason ? ' ' + t.reason : '') + '）' : ''));
-    }
-  } catch (e) {
-    lines.push('【要確認】Webhook 設定を取得できません: ' + (e.message || e));
+  if (info.userId && /^U[0-9a-f]{32}$/.test(info.userId)) {
+    PropertiesService.getScriptProperties().setProperty(PROP_KEYS.BOT_USER_ID, info.userId);
   }
+  lines.push('【情報】Webhook 受信方式: ' + (mode === WEBHOOK_MODES.DIRECT ? 'GAS単体（direct・署名検証なし）' : 'リレー経由（relay・署名検証あり）'));
+
+  var gasUrl = getSetting_(ID_KEYS.GAS_WEBAPP_URL);
+  var wh = null;
+  try {
+    wh = lineFetch_('get', '/v2/bot/channel/webhook/endpoint').body;
+  } catch (e) {
+    lines.push('【要確認】LINE 側の Webhook 設定を取得できません: ' + (e.message || e));
+  }
+  if (wh) {
+    lines.push((wh.active ? '【OK】' : '【NG】') + 'Webhook の利用: ' + (wh.active ? 'オン' : 'オフ（LINE Developers で「Webhookの利用」をオンにしてください）'));
+    var endpoint = wh.endpoint || '';
+    if (!endpoint) {
+      lines.push('【未設定】Webhook URL が LINE 側に登録されていません');
+    } else if (mode === WEBHOOK_MODES.DIRECT) {
+      var same = gasUrl && endpoint === gasUrl;
+      lines.push((same ? '【OK】' : '【要確認】') + 'Webhook URL: ' + endpoint +
+        (same ? '（ID管理の GAS_WEBAPP_URL と一致）' : gasUrl ? '\n  ※ ID管理の GAS_WEBAPP_URL（' + gasUrl + '）と一致しません' : '\n  ※ ID管理の GAS_WEBAPP_URL が未設定です'));
+    } else {
+      lines.push((/script\.google\.com/.test(endpoint) ? '【要確認】' : '【OK】') + 'Webhook URL: ' + endpoint +
+        (/script\.google\.com/.test(endpoint) ? '\n  ※ relay モードでは LINE の Webhook URL にリレーの /webhook を指定します' : ''));
+    }
+    if (p && p.testWebhook && endpoint) {
+      var before = Number(getProp_(PROP_KEYS.LAST_WEBHOOK_AT) || 0);
+      var t = lineFetch_('post', '/v2/bot/channel/webhook/test', { endpoint: endpoint }).body;
+      var after = Number(PropertiesService.getScriptProperties().getProperty(PROP_KEYS.LAST_WEBHOOK_AT) || 0);
+      var received = after > before;
+      lines.push((t.success ? '【OK】' : '【NG】') + 'LINE 側の疎通テスト結果: ' + (t.success ? '成功' : '失敗') +
+        (t.statusCode ? '（HTTP ' + t.statusCode + (t.reason ? ' ' + t.reason : '') + '）' : ''));
+      lines.push((received ? '【OK】' : '【NG】') + 'GAS 側の受信記録: ' + (received ? 'テスト中に受信を確認' : '受信を確認できません'));
+      if (Number(t.statusCode) === 302) {
+        lines.push('  ※ 302 は GAS の応答がリダイレクトになったことを示します。デプロイされている GAS が古い（ContentService で応答）可能性があります。' +
+          '最新のコードを反映し、ウェブアプリを「新バージョン」で更新してください。');
+      }
+      if (!t.success && received) lines.push('  → GAS は受信・処理していますが、LINE は失敗として扱っています（エラー統計・再送の対象になります）。');
+      if (t.success && !received) lines.push('  → LINE は成功と報告しましたが、この GAS の受信記録は更新されていません（別の URL・別のデプロイに届いている可能性）。');
+    } else if (!(p && p.testWebhook)) {
+      lines.push('【情報】疎通テストは実行していません');
+    }
+  }
+  var last = Number(getProp_(PROP_KEYS.LAST_WEBHOOK_AT) || 0);
+  lines.push('【情報】最終 Webhook 受信: ' + (last ? Utilities.formatDate(new Date(last), APP.TIMEZONE, 'yyyy/MM/dd HH:mm:ss') : '記録なし') +
+    '（受信記録は送信元を検証しないため、偽装リクエストでも更新されます）');
   try {
     var q = getMessageQuota_();
     lines.push('【情報】今月の配信数: ' + q.used + (q.type === 'limited' ? ' / ' + q.limit : '（上限なし）'));
   } catch (e) { /* 任意 */ }
-  return { ok: true, title: 'LINE接続チェック', message: lines.join('\n') };
+  if (mode === WEBHOOK_MODES.DIRECT) {
+    lines.push('\n◆ GAS単体構成の制約\n' + configWarnings_()[0]);
+  }
+  return { ok: !lines.some(function (l) { return l.indexOf('【NG】') === 0; }), title: 'LINE接続チェック', message: lines.join('\n') };
 }
 
 /** リッチメニュー設定確認（登録予定のボタンと現在の既定メニュー） */

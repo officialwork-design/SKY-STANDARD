@@ -170,6 +170,7 @@ function createGasEnv(opts = {}) {
       MimeType: { JSON: 'application/json' },
       createTextOutput: (s) => ({ content: s, setMimeType() { return this; }, getContent() { return s; } })
     },
+    HtmlService: { createHtmlOutput: (s) => ({ kind: 'html', content: s, getContent() { return s; } }) },
     MailApp: { sendEmail: (m) => mails.push(m) },
     Session: {
       getActiveUser: () => ({ getEmail: () => env.user }),
@@ -219,9 +220,11 @@ function createGasEnv(opts = {}) {
       vm.runInContext('invalidateIdCache_(); __ss = null;', ctx);
     },
     resetRequestCache() { vm.runInContext('__settingsCache = null;', ctx); },
+    /** doPost を呼ぶ。JSON 応答は解析して返し、HtmlService 応答（LINE 直接 Webhook）は { __html, content } を返す */
     doPost(obj) {
       const out = ctx.doPost({ postData: { contents: typeof obj === 'string' ? obj : JSON.stringify(obj) } });
       vm.runInContext('__settingsCache = null;', ctx);
+      if (out && out.kind === 'html') return { __html: true, content: out.getContent() };
       return JSON.parse(out.getContent());
     },
     linePosts(pathPart) {

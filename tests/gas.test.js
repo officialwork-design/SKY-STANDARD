@@ -72,11 +72,11 @@ test('古いタイムスタンプ（リプレイ）は拒否', () => {
   assert.equal(env.doPost(e).error, 'stale');
 });
 
-test('署名なしの LINE 直結は既定で拒否（ALLOW_UNSIGNED_WEBHOOK=true の開発時のみ許可）', () => {
-  const env = envWith();
-  assert.equal(env.doPost({ destination: 'U', events: [textEvent('予約')] }).error, 'signature_required');
-  const dev = envWith({ props: { ALLOW_UNSIGNED_WEBHOOK: 'true' } });
-  assert.equal(dev.doPost({ destination: 'U', events: [textEvent('予約')] }).ok, true);
+test('LINE からの直接 Webhook は HtmlService（HTTP 200）で応答。relay モードでは処理しない', () => {
+  const env = envWith({ props: { WEBHOOK_MODE: 'relay' } });
+  const out = env.doPost({ destination: 'U' + '0'.repeat(32), events: [] });
+  assert.equal(out.__html, true);
+  assert.equal(env.fetchCalls.length, 0);
 });
 
 test('同一 webhookEventId の再送は二重応答しない', () => {
@@ -659,10 +659,11 @@ test('エラーログの URL に含まれる LINE ユーザーIDをマスク', (
   assert.doesNotMatch(env.logs.join('\n'), new RegExp(USER));
 });
 
-test('ALLOW_UNSIGNED_WEBHOOK=true は設定チェックで警告', () => {
+test('廃止した ALLOW_UNSIGNED_WEBHOOK が残っていれば注意を表示（障害扱いにはしない）', () => {
   const env = envWith({ props: { ALLOW_UNSIGNED_WEBHOOK: 'true' } });
   const r = env.ctx.checkConfig_();
-  assert.ok(Object.keys(r.missing).some((k) => k.indexOf('警告') !== -1));
+  assert.ok(r.warnings.some((w) => /ALLOW_UNSIGNED_WEBHOOK は廃止/.test(w)));
+  assert.ok(!Object.keys(r.missing).some((k) => /Webhook/.test(k)));
 });
 
 test('5000 文字を超えるテキストは切り詰めて送信', () => {

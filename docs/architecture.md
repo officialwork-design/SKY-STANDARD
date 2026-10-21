@@ -1,5 +1,7 @@
 # アーキテクチャ
 
+> 標準構成は GAS単体（LINE → 本体GAS 直接）です。下図のリレーは任意構成です。GAS単体構成の制約と Webhook の扱いは [gas-only.md](gas-only.md) を参照してください。
+
 ## 全体構成
 
 ```text
@@ -41,7 +43,7 @@
 | ファイル | 内容 |
 |---|---|
 | `00_Config.gs` | 定数、ID管理シート（公開 ID・URL）／スクリプトプロパティ（秘密情報）の読み込み、キャッシュ、設定チェック |
-| `01_Webhook.gs` | `doPost`/`doGet`、リレー封筒の検証、イベント振り分け、重複排除 |
+| `01_Webhook.gs` | `doPost`/`doGet`、GAS単体受信（未検証イベントの形式検証・制限・HtmlService 応答）、任意のリレー封筒検証、イベント振り分け、重複排除 |
 | `02_LineApi.gs` | reply / push / profile / quota、`X-Line-Retry-Key`、エラー分類 |
 | `03_User.gs` | 顧客登録・友だち状態の更新 |
 | `04_FAQ.gs` | 表記揺れ正規化、キーワード優先順位、FAQ 検索 |
@@ -60,7 +62,8 @@ GAS は全ファイルを同一スコープで評価するため、トップレ�
 
 | kind | 送信元 | 認証 |
 |---|---|---|
-| `line_webhook` | リレー | `sig = base64(HMAC_SHA256(RELAY_SHARED_SECRET, ts + "." + body))`、`ts` は ±5分以内 |
+| LINE Webhook（`destination`・`events`） | LINE（直接・既定） | **認証なし**（GAS はヘッダーを読めないため署名検証不可）。未検証イベントとして制限付きで処理。[gas-only.md](gas-only.md) |
+| `line_webhook` | リレー（任意） | `sig = base64(HMAC_SHA256(RELAY_SHARED_SECRET, ts + "." + body))`、`ts` は ±5分以内 |
 | `liff_api` | 予約確認画面 | LINE の ID トークンを `https://api.line.me/oauth2/v2.1/verify` で検証（`aud`/`iss`/`exp` も確認） |
 | `reservation_event` | 予約サイト | `sig = hex(HMAC_SHA256(RESERVATION_WEBHOOK_SECRET, ts + "." + payload))`、`ts` は ±5分以内 |
 

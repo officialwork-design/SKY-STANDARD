@@ -107,7 +107,9 @@ function skyMenuSetupSheets() {
 function skyMenuCheckIds() { return run_('checkIds'); }
 
 function skyMenuCheckLine() {
-  var test = confirm_('LINE接続チェック', 'Webhook URL への疎通テスト（LINE から検証リクエストを送信）も実行しますか？\n「いいえ」の場合は接続確認のみ行います。');
+  var test = confirm_('LINE接続チェック', 'Webhook URL への疎通テストも実行しますか？\n' +
+    'LINE から検証リクエストを送り、「LINE 側の判定（HTTP ステータス）」と「GAS 側で受信できたか」を分けて表示します。\n' +
+    '「いいえ」の場合は接続確認のみ行います。');
   return run_('checkLine', { testWebhook: test });
 }
 

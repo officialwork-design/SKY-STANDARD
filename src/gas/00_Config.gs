@@ -126,7 +126,14 @@ var PROP_KEYS = {
   RICHMENU_IMAGE_FILE_ID: 'RICHMENU_IMAGE_FILE_ID',
   ALLOW_UNSIGNED_WEBHOOK: 'ALLOW_UNSIGNED_WEBHOOK',
   ADMIN_USERS: 'ADMIN_USERS',
-  RESERVATION_API_ALLOWED_HOST: 'RESERVATION_API_ALLOWED_HOST'
+  RESERVATION_API_ALLOWED_HOST: 'RESERVATION_API_ALLOWED_HOST',
+  /** Webhook 受信方式: direct（既定・GAS単体・署名検証なし）/ relay（署名検証リレー経由） */
+  WEBHOOK_MODE: 'WEBHOOK_MODE',
+  /** 自動保存: ボットのユーザーID（destination の照合用。秘密情報ではない） */
+  BOT_USER_ID: 'BOT_USER_ID',
+  /** 自動保存: 最終 Webhook 受信時刻・イベント数（診断用） */
+  LAST_WEBHOOK_AT: 'LAST_WEBHOOK_AT',
+  LAST_WEBHOOK_EVENTS: 'LAST_WEBHOOK_EVENTS'
 };
 
 /** 既定の友だち追加メッセージ（通知テンプレート WELCOME が有効ならそちらを優先） */
@@ -256,9 +263,10 @@ function checkConfig_() {
   need('起動', !!getProp_(PROP_KEYS.SPREADSHEET_ID), 'SPREADSHEET_ID（スクリプトプロパティ）');
   need('管理メニュー', !!getProp_(PROP_KEYS.ADMIN_USERS), 'ADMIN_USERS（スクリプトプロパティ。管理者のメールアドレス）');
   need('Messaging API', !!getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN), 'LINE_CHANNEL_ACCESS_TOKEN（スクリプトプロパティ）');
-  need('Webhook署名検証', !!getProp_(PROP_KEYS.RELAY_SHARED_SECRET), 'RELAY_SHARED_SECRET（スクリプトプロパティ）');
-  need('【警告】本番では無効にする設定', getProp_(PROP_KEYS.ALLOW_UNSIGNED_WEBHOOK) !== 'true',
-    'ALLOW_UNSIGNED_WEBHOOK が true です（署名なし Webhook を受け付けています）。削除してください');
+  // Webhook：GAS単体（direct・既定）は追加設定不要。relay を選んだ場合のみ共有シークレットが必要
+  if (getWebhookMode_() === WEBHOOK_MODES.RELAY) {
+    need('Webhook（リレー経由）', !!getProp_(PROP_KEYS.RELAY_SHARED_SECRET), 'RELAY_SHARED_SECRET（スクリプトプロパティ。WEBHOOK_MODE=relay のとき必須）');
+  }
   need('予約確認(LIFF)', !!getSetting_(ID_KEYS.LINE_LOGIN_CHANNEL_ID), idLabel(ID_KEYS.LINE_LOGIN_CHANNEL_ID));
   need('予約確認(LIFF)', !!getSetting_(ID_KEYS.LIFF_ID), idLabel(ID_KEYS.LIFF_ID));
   need('予約確認(LIFF)', !!getSetting_(ID_KEYS.GAS_WEBAPP_URL), idLabel(ID_KEYS.GAS_WEBAPP_URL));
@@ -275,5 +283,20 @@ function checkConfig_() {
     need('予約システムAPI', !!getProp_(PROP_KEYS.RESERVATION_API_ALLOWED_HOST),
       'RESERVATION_API_ALLOWED_HOST（スクリプトプロパティ。API キーを送ってよいホスト名）');
   }
-  return { ok: Object.keys(missing).length === 0, missing: missing };
+  return { ok: Object.keys(missing).length === 0, missing: missing, warnings: configWarnings_() };
+}
+
+/**
+ * 不足ではないが運用上知っておくべき注意（障害扱いにしない）。
+ */
+function configWarnings_() {
+  var w = [];
+  if (getWebhookMode_() === WEBHOOK_MODES.DIRECT) {
+    w.push('Webhook は GAS単体（direct）で受信しています。GAS はリクエストヘッダーを読めないため LINE の署名（X-Line-Signature）を検証できません。' +
+      '受信イベントは「未検証」として扱い、記録・通知は応答トークン確認後のみ、予約状態の変更・個人情報の開示・管理操作は Webhook からは行いません。');
+  }
+  if (getProp_(PROP_KEYS.ALLOW_UNSIGNED_WEBHOOK)) {
+    w.push('ALLOW_UNSIGNED_WEBHOOK は廃止しました（WEBHOOK_MODE で制御）。スクリプトプロパティから削除してください。');
+  }
+  return w;
 }

@@ -191,13 +191,21 @@ test('LINE接続チェック: トークン未設定なら安全に停止し不�
   assert.equal(e.fetchCalls.length, 0);
 });
 
-test('LINE接続チェック: Bot 情報・Webhook・疎通テスト', () => {
-  const e = env();
+test('LINE接続チェック（relay モード）: Bot 情報・Webhook・疎通テスト', () => {
+  const e = env({ props: { WEBHOOK_MODE: 'relay' }, fetch: (url) => {
+    if (url.indexOf('/webhook/test') !== -1) {
+      e.props.LAST_WEBHOOK_AT = String(Date.now() + 1); // リレー経由で GAS が受信した状態を模擬
+      return { code: 200, body: { success: true, statusCode: 200, reason: 'OK' } };
+    }
+    return lineOk(url);
+  } });
   const r = e.ctx.adminRun('checkLine', { testWebhook: true });
   assert.equal(r.ok, true);
   assert.match(r.message, /SKY STANDARD/);
+  assert.match(r.message, /リレー経由/);
   assert.match(r.message, /Webhook URL: https:\/\/relay\.example\/webhook/);
-  assert.match(r.message, /疎通テスト: 成功/);
+  assert.match(r.message, /LINE 側の疎通テスト結果: 成功/);
+  assert.match(r.message, /GAS 側の受信記録: テスト中に受信を確認/);
   assert.doesNotMatch(r.message, new RegExp(TOKEN));
 });
 

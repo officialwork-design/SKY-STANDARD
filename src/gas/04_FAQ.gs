@@ -229,7 +229,10 @@ function buildFaqAnswerById_(id) {
 /** 一致なし：担当者へ送るか選択してもらう */
 function buildUnmatchedReply_(text, userId) {
   if (userId && text) {
-    CacheService.getScriptCache().put('last:' + userId, String(text).substring(0, 2000), APP.INQUIRY_STATE_TTL_SEC);
+    // 「担当者に送る」用に直前のメッセージを保持。未検証イベントでは応答成功後にのみ保存する
+    __pendingAfterReply = function () {
+      CacheService.getScriptCache().put('last:' + userId, String(text).substring(0, 2000), APP.INQUIRY_STATE_TTL_SEC);
+    };
   }
   var items = [];
   if (userId && text) items.push(postbackAction_('担当者に送る', 'a=inq_handoff', '担当者に送る'));

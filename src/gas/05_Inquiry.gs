@@ -44,23 +44,82 @@ function clearInquiryState_(userId) {
 function startInquiry_(ev, userId, categoryKey) {
   var cat = INQUIRY_CATEGORIES[categoryKey];
   if (!cat || !userId) return replyMessage_(ev.replyToken, buildInquiryCategoryMessage_());
-  setInquiryState_(userId, { c: categoryKey });
   var guide = categoryKey === '4'
     ? '【チャーター見積】\nご希望日・人数・出発地／目的地・ご予算などを、1通のメッセージでお送りください。'
     : '【' + cat.label + '】\nお問い合わせ内容を1通のメッセージでお送りください。' +
       (categoryKey === '2' ? '\n予約番号をお持ちの場合は併せてご記入ください。' : '');
-  return replyMessage_(ev.replyToken, withQuickReply_(guide, [postbackAction_('入力をやめる', 'a=inq_cancel', '入力をやめる')]));
+  // 応答が LINE に受理されてから入力待ち状態にする（偽装イベントで他人の状態を変えさせない）
+  var res = replyMessage_(ev.replyToken, withQuickReply_(guide, [postbackAction_('入力をやめる', 'a=inq_cancel', '入力をやめる')]));
+  if (__replySent || isVerifiedEvent_()) setInquiryState_(userId, { c: categoryKey });
+  return res;
 }
 
 /** 内容入力を受け付けて保存 */
 function handleInquiryInput_(ev, userId, text) {
   var state = getInquiryState_(userId);
-  clearInquiryState_(userId);
   var cat = INQUIRY_CATEGORIES[state && state.c] || INQUIRY_CATEGORIES['5'];
+  if (!isVerifiedEvent_()) return acceptInquiryUnverified_(ev, userId, cat, text, '');
+  clearInquiryState_(userId);
   var id = saveInquiry_(userId, cat, text);
   notifyInquiry_(id, cat, text); // 返信に失敗しても運営には必ず通知する
   replyReceivedSafely_(ev, id);
   return id;
+}
+
+/**
+ * 未検証イベント（GAS単体受信）の問い合わせ受付。
+ * 受付IDを予約して先に応答し、LINE が応答を受理した（＝本物の応答トークン）場合のみ保存・運営通知する。
+ * 応答に失敗・応答トークンなしの場合は何も保存せず、入力待ち状態も変更しない。
+ * 応答後に保存が失敗した場合は、運営に「保存失敗」として内容を通知する（LINE の再送は来ないため）。
+ */
+function acceptInquiryUnverified_(ev, userId, cat, text, note) {
+  var id = reserveInquiryId_();
+  try {
+    replyMessage_(ev.replyToken, inquiryReceivedText_(id));
+  } catch (e) {
+    logWarn_('inquiry.unverified_reply_rejected', { status: e.status });
+    throw e;
+  }
+  if (!__replySent) {
+    logWarn_('inquiry.unverified_no_reply', {});
+    return null;
+  }
+  clearInquiryState_(userId);
+  CacheService.getScriptCache().remove('last:' + userId);
+  try {
+    withLock_(function () {
+      appendRow_(SHEETS.INQUIRIES, {
+        '受付ID': id, 'LINEユーザーID': userId, '受付日時': nowString_(), '種別': cat.label,
+        '内容': String(text || '').substring(0, 5000), '対応状況': '未対応', '担当者': '', '回答日時': '',
+        '備考': [note, cat.important ? '重要' : '', 'GAS単体受信（応答トークン確認済み・署名未検証）'].filter(String).join(' / ')
+      });
+    });
+    logInfo_('inquiry.saved', { id: id, category: cat.label, userId: userId, verified: false });
+  } catch (e) {
+    logError_('inquiry.save_failed_after_reply', e, { id: id });
+    notifyAdmin_('【要対応】問い合わせの保存に失敗 ' + id, '利用者には受付IDを返信済みですが、シートへの保存に失敗しました。\n受付ID：' + id +
+      '\n種別：' + cat.label + '\n内容：' + String(text || '').substring(0, 300) + '\n\n「問い合わせ管理」に手動で追記してください。');
+    return id;
+  }
+  notifyInquiry_(id, cat, text);
+  return id;
+}
+
+/**
+ * 受付IDの予約（シート上の最大番号とキャッシュ上の採番済み番号の大きい方＋1）。
+ * 応答 API 呼び出しの間ロックを保持しないため、同時受付でも同じ ID にならないよう採番だけをロック内で行う。
+ */
+function reserveInquiryId_() {
+  return withLock_(function () {
+    var cache = CacheService.getScriptCache();
+    var day = Utilities.formatDate(new Date(), APP.TIMEZONE, 'yyyyMMdd');
+    var key = 'inqseq:' + day;
+    var fromSheet = parseInt(nextId_('INQ', SHEETS.INQUIRIES, '受付ID').split('-').pop(), 10);
+    var fromCache = parseInt(cache.get(key) || '0', 10) + 1;
+    var n = Math.max(fromSheet, fromCache);
+    cache.put(key, String(n), 21600);
+    return 'INQ-' + day + '-' + ('000' + n).slice(-4);
+  });
 }
 
 /** 「担当者に送る」：直前の未一致メッセージを問い合わせとして登録 */
@@ -70,8 +129,9 @@ function handoffLastMessage_(ev, userId) {
   if (!last) {
     return replyMessage_(ev.replyToken, buildInquiryCategoryMessage_());
   }
-  cache.remove('last:' + userId);
   var cat = INQUIRY_CATEGORIES['5'];
+  if (!isVerifiedEvent_()) return acceptInquiryUnverified_(ev, userId, cat, last, '自動応答で未一致→有人対応');
+  cache.remove('last:' + userId);
   var id = saveInquiry_(userId, cat, last, '自動応答で未一致→有人対応');
   notifyInquiry_(id, cat, last);
   replyReceivedSafely_(ev, id);

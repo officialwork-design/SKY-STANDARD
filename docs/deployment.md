@@ -35,7 +35,11 @@ GAS エディタで `src/gas` の各ファイルと同名のスクリプトフ�
 3. 発行された URL（`https://script.google.com/macros/s/.../exec`）を ID管理シートの `GAS_WEBAPP_URL` に入力（リレーの環境変数にも設定）。
 4. コード更新時は「デプロイを管理」→ 既存デプロイを編集 →「新バージョン」で URL を変えずに更新（`clasp deploy -i <deploymentId>` でも可）。
 
-## 3. 署名検証リレー（Cloud Run の例）
+## 任意：署名検証リレー（旧構成）
+
+> 標準の GAS単体構成では不要です（LINE の Webhook URL に GAS_WEBAPP_URL を直接指定）。署名検証が必要になった場合のみ実施し、本体GASのスクリプトプロパティに `WEBHOOK_MODE=relay` と `RELAY_SHARED_SECRET` を設定してください。
+
+### Cloud Run の例
 
 ```bash
 cd src/relay
