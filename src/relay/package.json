@@ -1,0 +1,9 @@
+{
+  "name": "sky-standard-line-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LINE Webhook signature verification relay for SKY STANDARD (forwards to GAS)",
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node server.js" }
+}

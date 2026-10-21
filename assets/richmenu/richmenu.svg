@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2500" height="1686" viewBox="0 0 2500 1686">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0E2547"/>
+      <stop offset="1" stop-color="#081830"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E3C887"/>
+      <stop offset="0.5" stop-color="#C9A45C"/>
+      <stop offset="1" stop-color="#A9843F"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#173563"/>
+      <stop offset="1" stop-color="#0E2547"/>
+    </linearGradient>
+    <style>
+      .label { font-family: 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif; font-weight: 700; fill: #FFFFFF; font-size: 92px; letter-spacing: 4px; }
+      .sub { font-family: 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif; font-weight: 500; fill: #C9A45C; font-size: 40px; letter-spacing: 10px; }
+      .icon { fill: none; stroke: #D2AF66; stroke-width: 14; stroke-linecap: round; stroke-linejoin: round; }
+      .iconfill { fill: #D2AF66; }
+      .brand { font-family: 'Noto Serif CJK JP', serif; font-weight: 700; fill: #C9A45C; font-size: 30px; letter-spacing: 12px; }
+    </style>
+  </defs>
+
+  <rect width="2500" height="1686" fill="url(#bg)"/>
+  <!-- 予約ボタン（主導線）をわずかに明るく -->
+  <rect x="0" y="0" width="833" height="843" fill="url(#hero)"/>
+
+  <!-- gold grid lines -->
+  <g stroke="#C9A45C" stroke-opacity="0.55" stroke-width="4">
+    <line x1="833" y1="60" x2="833" y2="1626"/>
+    <line x1="1666" y1="60" x2="1666" y2="1626"/>
+    <line x1="60" y1="843" x2="2440" y2="843"/>
+  </g>
+  <rect x="14" y="14" width="2472" height="1658" fill="none" stroke="#C9A45C" stroke-opacity="0.8" stroke-width="6"/>
+
+  <!-- 1: フライト予約 (helicopter) -->
+  <g transform="translate(436,330)">
+    <line class="icon" x1="-190" y1="-130" x2="150" y2="-130"/>
+    <line class="icon" x1="-20" y1="-130" x2="-20" y2="-80"/>
+    <path class="icon" d="M -110 -80 H 40 C 110 -80 150 -30 150 20 C 150 60 120 80 80 80 H -90 C -125 80 -140 55 -140 20 V -40 C -140 -65 -130 -80 -110 -80 Z"/>
+    <path class="icon" d="M 45 -72 C 95 -66 128 -30 136 10 H 45 Z"/>
+    <path class="icon" d="M -140 0 L -300 -10"/>
+    <circle class="icon" cx="-310" cy="-12" r="34"/>
+    <line class="icon" x1="-70" y1="80" x2="-85" y2="125"/>
+    <line class="icon" x1="70" y1="80" x2="85" y2="125"/>
+    <path class="icon" d="M -150 125 H 150 C 170 125 180 115 185 100"/>
+  </g>
+  <text class="label" x="416" y="610" text-anchor="middle">フライト予約</text>
+  <text class="sub" x="416" y="690" text-anchor="middle">BOOK A FLIGHT</text>
+
+  <!-- 2: 予約確認 (calendar check) -->
+  <g transform="translate(1249,330)">
+    <rect class="icon" x="-140" y="-120" width="280" height="250" rx="28"/>
+    <line class="icon" x1="-140" y1="-40" x2="140" y2="-40"/>
+    <line class="icon" x1="-70" y1="-150" x2="-70" y2="-90"/>
+    <line class="icon" x1="70" y1="-150" x2="70" y2="-90"/>
+    <path class="icon" d="M -65 45 L -15 92 L 75 2"/>
+  </g>
+  <text class="label" x="1249" y="610" text-anchor="middle">予約確認</text>
+  <text class="sub" x="1249" y="690" text-anchor="middle">MY BOOKING</text>
+
+  <!-- 3: プラン一覧 (list) -->
+  <g transform="translate(2082,330)">
+    <rect class="icon" x="-130" y="-140" width="260" height="290" rx="24"/>
+    <circle class="iconfill" cx="-70" cy="-60" r="14"/>
+    <circle class="iconfill" cx="-70" cy="10" r="14"/>
+    <circle class="iconfill" cx="-70" cy="80" r="14"/>
+    <line class="icon" x1="-30" y1="-60" x2="80" y2="-60"/>
+    <line class="icon" x1="-30" y1="10" x2="80" y2="10"/>
+    <line class="icon" x1="-30" y1="80" x2="80" y2="80"/>
+  </g>
+  <text class="label" x="2082" y="610" text-anchor="middle">プラン一覧</text>
+  <text class="sub" x="2082" y="690" text-anchor="middle">PLANS</text>
+
+  <!-- 4: チャーター (crown / private) -->
+  <g transform="translate(416,1173)">
+    <path class="icon" d="M -150 70 L -170 -90 L -75 -10 L 0 -130 L 75 -10 L 170 -90 L 150 70 Z"/>
+    <line class="icon" x1="-150" y1="125" x2="150" y2="125"/>
+  </g>
+  <text class="label" x="416" y="1453" text-anchor="middle">チャーター</text>
+  <text class="sub" x="416" y="1533" text-anchor="middle">PRIVATE CHARTER</text>
+
+  <!-- 5: お問い合わせ (chat bubble) -->
+  <g transform="translate(1249,1173)">
+    <path class="icon" d="M -150 -110 H 150 C 175 -110 190 -95 190 -70 V 50 C 190 75 175 90 150 90 H -40 L -120 150 V 90 H -150 C -175 90 -190 75 -190 50 V -70 C -190 -95 -175 -110 -150 -110 Z"/>
+    <circle class="iconfill" cx="-80" cy="-10" r="17"/>
+    <circle class="iconfill" cx="0" cy="-10" r="17"/>
+    <circle class="iconfill" cx="80" cy="-10" r="17"/>
+  </g>
+  <text class="label" x="1249" y="1453" text-anchor="middle">お問い合わせ</text>
+  <text class="sub" x="1249" y="1533" text-anchor="middle">CONTACT</text>
+
+  <!-- 6: よくある質問 (question) -->
+  <g transform="translate(2082,1173)">
+    <circle class="icon" cx="0" cy="0" r="150"/>
+    <path class="icon" d="M -50 -45 C -50 -95 50 -95 50 -45 C 50 -5 0 0 0 40"/>
+    <circle class="iconfill" cx="0" cy="92" r="16"/>
+  </g>
+  <text class="label" x="2082" y="1453" text-anchor="middle">よくある質問</text>
+  <text class="sub" x="2082" y="1533" text-anchor="middle">FAQ</text>
+
+</svg>

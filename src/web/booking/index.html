@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>予約確認｜SKY STANDARD</title>
+  <link rel="stylesheet" href="style.css">
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="brand">
+    <span class="brand__mark">SKY STANDARD</span>
+    <span class="brand__title">予約確認</span>
+  </header>
+
+  <main id="app" aria-live="polite">
+    <!-- 読み込み中 -->
+    <section id="view-loading" class="view">
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="loading-text">読み込んでいます…</p>
+    </section>
+
+    <!-- エラー -->
+    <section id="view-error" class="view" hidden>
+      <h1 class="h1">ご確認ください</h1>
+      <p id="error-text" class="muted"></p>
+      <div class="actions">
+        <button id="btn-retry" class="btn btn--gold" type="button">もう一度読み込む</button>
+        <button id="btn-relogin" class="btn btn--ghost" type="button" hidden>LINEで再ログイン</button>
+      </div>
+    </section>
+
+    <!-- 予約一覧 -->
+    <section id="view-list" class="view" hidden>
+      <h1 class="h1">ご予約一覧</h1>
+      <ul id="list" class="cards"></ul>
+    </section>
+
+    <!-- 予約なし・本人確認 -->
+    <section id="view-empty" class="view" hidden>
+      <h1 class="h1">ご予約が見つかりません</h1>
+      <p class="muted">このLINEアカウントに紐づくご予約はありません。予約サイトでご予約済みの場合は、予約番号とご予約時の電話番号またはメールアドレスで本人確認を行うと、ご予約を表示できます。</p>
+      <form id="link-form" class="form" novalidate>
+        <label class="field">
+          <span>予約番号</span>
+          <input id="link-id" name="reservationId" autocomplete="off" inputmode="text" maxlength="64" required>
+        </label>
+        <label class="field">
+          <span>ご予約時の電話番号またはメールアドレス</span>
+          <input id="link-contact" name="contact" autocomplete="off" maxlength="254" required>
+        </label>
+        <p id="link-msg" class="form__msg" role="alert"></p>
+        <button class="btn btn--gold" type="submit">本人確認して表示する</button>
+      </form>
+    </section>
+
+    <!-- 予約詳細 -->
+    <section id="view-detail" class="view" hidden>
+      <button id="btn-back" class="link" type="button">‹ 一覧に戻る</button>
+      <h1 class="h1" id="d-plan"></h1>
+      <div id="d-badges" class="badges"></div>
+      <dl class="detail">
+        <dt>予約番号</dt><dd id="d-id"></dd>
+        <dt>搭乗予定日</dt><dd id="d-date"></dd>
+        <dt>搭乗時間</dt><dd id="d-time"></dd>
+        <dt>搭乗人数</dt><dd id="d-pax"></dd>
+        <dt>予約金額</dt><dd id="d-amount"></dd>
+        <dt>予約ステータス</dt><dd id="d-status"></dd>
+        <dt>決済ステータス</dt><dd id="d-payment"></dd>
+        <dt>集合場所</dt><dd id="d-meeting"></dd>
+      </dl>
+      <div class="notes">
+        <h2 class="h2">注意事項</h2>
+        <p id="d-notes"></p>
+      </div>
+    </section>
+
+    <div class="footer-actions" id="footer-actions" hidden>
+      <button id="btn-inquiry" class="btn btn--ghost" type="button">このご予約について問い合わせる</button>
+      <p id="inquiry-msg" class="muted small" hidden>LINEのトーク画面で「お問い合わせ」と送信してください。</p>
+    </div>
+  </main>
+</body>
+</html>
