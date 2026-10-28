@@ -124,7 +124,7 @@ test('WELCOME テンプレートが OFF の場合は指定のあいさつ文を�
   env.sheets['通知テンプレート'].data[1][4] = 'OFF';
   send(env, { type: 'follow', webhookEventId: 'f2', replyToken: 'rt', source: { type: 'user', userId: USER } });
   assert.equal(lastReply(env).messages[0].text,
-    'SKY STANDARD公式LINEへようこそ。\n\nヘリコプター遊覧飛行・チャーターサービスをご案内しています。\n\nフライトのご予約、予約確認、お問い合わせは、画面下のメニューからご利用ください。');
+    '🚁 SKY STANDARD公式LINEへようこそ。\nご登録いただき、誠にありがとうございます。\n\n空の旅に関するご相談は、画面下のメニューよりお気軽にお申し付けくださいませ。✨');
 });
 
 test('ブロック時は友だち状態をブロックに更新し、通知対象外にする', () => {
@@ -165,7 +165,7 @@ test('表記揺れ（ひらがな・全角英字）を吸収', () => {
   send(env, textEvent('よやく'));
   assert.match(replyText(env), /予約/);
   send(env, textEvent('ＦＡＱ'));
-  assert.match(replyText(env), /よくある質問/);
+  assert.match(replyText(env), /よくあるご質問/);
 });
 
 test('優先順位: 「予約確認」は予約より優先され LIFF URL を返す', () => {
@@ -218,7 +218,7 @@ test('一致しない質問は担当者へ送る導線を出す', () => {
   const env = envWith();
   send(env, textEvent('ペットは同乗できますか'));
   const m = lastReply(env).messages[0];
-  assert.match(m.text, /見つかりませんでした/);
+  assert.match(m.text, /自動ではお答えできない内容/);
   assert.ok(m.quickReply.items.some((i) => i.action.data === 'a=inq_handoff'));
 });
 
@@ -258,7 +258,7 @@ test('問い合わせ入力中にメニュー操作をした場合は入力を�
   send(env, postbackEvent('a=inq_cat&c=1'));
   send(env, textEvent('FAQ'));
   assert.equal(env.rows('問い合わせ管理').length, 0);
-  assert.match(replyText(env), /よくある質問/);
+  assert.match(replyText(env), /よくあるご質問/);
 });
 
 test('担当者に送る: 未一致メッセージを問い合わせとして登録', () => {

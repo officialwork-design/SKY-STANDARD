@@ -126,7 +126,7 @@ function findFaqByTopic_(faqs, words) {
 function faqAnswerMessage_(faq) {
   var text = faq.answer;
   if (faq.needsHuman) {
-    text += '\n\n個別の状況は担当者が確認してご案内します。必要な場合は「お問い合わせ」からご連絡ください。';
+    text += '\n\n個別のご状況につきましては、担当者がご案内いたします。下記よりお気軽にご相談くださいませ。';
     return withQuickReply_(text, [postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ'), messageAction_('よくある質問', 'FAQ')]);
   }
   return withQuickReply_(text, [messageAction_('よくある質問', 'FAQ'), postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ')]);
@@ -158,34 +158,27 @@ function buildAutoReply_(text, userId) {
 function buildIntentReply_(intent, faqs) {
   switch (intent) {
     case 'BOOKING':
-      return buildLinkMessage_('フライトのご予約は予約ページから、プラン・日程をお選びください。お支払いまで予約ページで完結します。',
-        'フライト予約', getUrlSetting_(SETTING_KEYS.BOOKING_URL));
+      return buildLinkMessage_(INTENT_TEXT.BOOKING, 'フライト予約', getUrlSetting_(SETTING_KEYS.BOOKING_URL), INTENT_TEXT.BOOKING_PENDING);
     case 'BOOKING_CHECK':
-      return buildLinkMessage_('ご予約内容は予約確認ページでご確認いただけます。LINEでの本人確認後、ご本人のご予約のみ表示されます。',
-        '予約確認', getBookingCheckUrl_());
+      return buildLinkMessage_(INTENT_TEXT.BOOKING_CHECK, '予約確認', getBookingCheckUrl_(), INTENT_TEXT.BOOKING_CHECK_PENDING);
     case 'PLAN':
-      return buildLinkMessage_('遊覧飛行プランの一覧はこちらからご覧いただけます。', 'プラン一覧', getUrlSetting_(SETTING_KEYS.PLANS_URL));
+      return buildLinkMessage_(INTENT_TEXT.PLAN, 'プラン一覧', getUrlSetting_(SETTING_KEYS.PLANS_URL), INTENT_TEXT.PLAN_PENDING);
     case 'PRICE': {
       var f = findFaqByTopic_(faqs, ['料金', '価格']);
       if (f) return [faqAnswerMessage_(f)];
-      return buildLinkMessage_('料金はプラン・人数・日程により異なります。各プランの料金はプラン一覧でご確認ください。',
-        'プラン一覧', getUrlSetting_(SETTING_KEYS.PLANS_URL));
+      return buildLinkMessage_(INTENT_TEXT.PRICE, 'プラン一覧', getUrlSetting_(SETTING_KEYS.PLANS_URL), INTENT_TEXT.PRICE_PENDING);
     }
     case 'CHARTER': {
-      var msgs = buildLinkMessage_('チャーター（貸切）フライトのご案内です。詳細・お見積りはチャーターページ、またはお問い合わせからご依頼ください。',
-        'チャーター', getUrlSetting_(SETTING_KEYS.CHARTER_URL));
-      msgs.push(withQuickReply_('お見積りをご希望の場合は下のボタンからどうぞ。', [postbackAction_('見積を依頼', 'a=inq_cat&c=4', 'チャーター見積')]));
+      var msgs = buildLinkMessage_(INTENT_TEXT.CHARTER, 'チャーター', getUrlSetting_(SETTING_KEYS.CHARTER_URL), INTENT_TEXT.CHARTER_PENDING);
+      msgs.push(withQuickReply_(INTENT_TEXT.CHARTER_QUOTE, [postbackAction_('見積を依頼', 'a=inq_cat&c=4', 'チャーター見積')]));
       return msgs;
     }
     case 'WEATHER':
-      return [topicReply_(faqs, ['運航', '天候', '雨天', '悪天候', '天気'],
-        '天候等により運航内容が変更となる場合があります。運航可否は担当者が判断し、必要に応じてLINEでご案内します。')];
+      return [topicReply_(faqs, ['運航', '天候', '雨天', '悪天候', '天気'], INTENT_TEXT.WEATHER)];
     case 'CANCEL':
-      return [topicReply_(faqs, ['キャンセル', '取消'],
-        'キャンセル条件はプラン・予約条件によって異なります。予約確認ページで内容をご確認いただくか、お問い合わせください。')];
+      return [topicReply_(faqs, ['キャンセル', '取消'], getBookingCheckUrl_() ? INTENT_TEXT.CANCEL : INTENT_TEXT.CANCEL_NO_PAGE)];
     case 'MEETING_POINT':
-      return [topicReply_(faqs, ['集合場所', '集合', 'アクセス'],
-        '集合場所はご予約のプランによって異なります。予約確認ページのご予約詳細でご確認ください。')];
+      return [topicReply_(faqs, ['集合場所', '集合', 'アクセス'], getBookingCheckUrl_() ? INTENT_TEXT.MEETING_POINT : INTENT_TEXT.MEETING_POINT_NO_PAGE)];
     case 'INQUIRY':
       return [buildInquiryCategoryMessage_()];
     case 'FAQ':
@@ -193,6 +186,32 @@ function buildIntentReply_(intent, faqs) {
   }
   return buildUnmatchedReply_('', null);
 }
+
+/**
+ * キーワード応答の文面（GAS 固定。FAQ シートに該当する回答があればそちらを優先する）。
+ * *_PENDING / *_NO_PAGE は、ID管理に該当ページの URL が未設定のときの文面（ページがあるかのように案内しない）。
+ */
+var INTENT_TEXT = {
+  BOOKING: '🚁 フライトのご予約は、下記の予約ページより承っております。\nプランと日程をお選びいただき、お支払いまでお手続きいただけます。',
+  BOOKING_PENDING: '🚁 オンラインでのご予約受付は、現在準備中でございます。\nご予約のご相談は、メニューの「お問い合わせ」より承ります。',
+  BOOKING_CHECK: '🔖 ご予約内容は、下記の予約確認ページにてご確認いただけます。\nLINEでご本人様を確認のうえ、お客様のご予約のみを表示いたします。',
+  BOOKING_CHECK_PENDING: '🔖 予約確認ページは、現在準備中でございます。\nご予約内容の確認・変更は、メニューの「お問い合わせ」より承ります。',
+  PLAN: '✨ 遊覧飛行のプランは、下記よりご覧いただけます。',
+  PLAN_PENDING: '✨ プラン一覧は、現在準備中でございます。\n公開まで今しばらくお待ちくださいませ。',
+  PRICE: '🚁 料金はプラン・人数・日程により異なります。\n各プランの料金は、下記のプラン一覧にてご確認くださいませ。',
+  PRICE_PENDING: '🚁 料金はプラン・人数・日程により異なります。\nプラン一覧は現在準備中のため、料金のご相談はメニューの「お問い合わせ」より承ります。',
+  CHARTER: '🚁 チャーター（貸切）フライトのご案内は、下記よりご覧いただけます。',
+  CHARTER_PENDING: '🚁 チャーターのご案内ページは、現在準備中でございます。',
+  CHARTER_QUOTE: '✨ チャーターのお見積りも承っております。',
+  WEATHER: '🌤️ 天候や運航状況により、フライト内容が変更となる場合がございます。\n運航の可否は担当者が判断し、必要に応じてLINEでご案内いたします。',
+  CANCEL: '📋 キャンセル条件は、プランやご予約内容によって異なります。\n予約確認ページにてご確認いただくか、お気軽にご相談くださいませ。',
+  CANCEL_NO_PAGE: '📋 キャンセル条件は、プランやご予約内容によって異なります。\n詳しくは担当者がご案内いたしますので、お気軽にご相談くださいませ。',
+  MEETING_POINT: '📍 集合場所は、ご予約のプランによって異なります。\n予約確認ページのご予約詳細にてご確認くださいませ。',
+  MEETING_POINT_NO_PAGE: '📍 集合場所は、ご予約のプランによって異なります。\nご不明な点は、担当者がご案内いたします。',
+  FAQ_MENU: '📋 よくあるご質問です。\n下記よりお選びいただくか、知りたい内容をメッセージでお送りくださいませ。',
+  FAQ_EMPTY: '📋 よくあるご質問は、現在準備中でございます。\nご不明な点は、お気軽にご相談くださいませ。',
+  UNMATCHED: '📩 メッセージをありがとうございます。\n自動ではお答えできない内容のため、ご希望の対応を下記よりお選びくださいませ。'
+};
 
 /** トピック応答：FAQ にあればそれを、なければ既定文＋問い合わせ導線 */
 function topicReply_(faqs, words, fallback) {
@@ -208,15 +227,14 @@ function topicReply_(faqs, words, fallback) {
 function buildFaqMenu_(faqs) {
   faqs = faqs || loadFaqs_();
   if (!faqs.length) {
-    return withQuickReply_('よくある質問は現在準備中です。お手数ですが「お問い合わせ」からご連絡ください。',
-      [postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ')]);
+    return withQuickReply_(INTENT_TEXT.FAQ_EMPTY, [postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ')]);
   }
   var items = faqs.slice(0, 12).map(function (f) {
     var label = f.question.split(/[,，、]/)[0];
     return postbackAction_(label, 'a=faq&id=' + encodeURIComponent(f.id), label);
   });
   items.push(postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ'));
-  return withQuickReply_('よくある質問です。知りたい項目を下から選ぶか、キーワード（例：料金、キャンセル、集合場所）を送信してください。', items);
+  return withQuickReply_(INTENT_TEXT.FAQ_MENU, items);
 }
 
 /** FAQ ID 指定で回答 */
@@ -239,6 +257,5 @@ function buildUnmatchedReply_(text, userId) {
   items.push(messageAction_('よくある質問', 'FAQ'));
   items.push(postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ'));
   items.push(messageAction_('予約', '予約'));
-  return [withQuickReply_('メッセージありがとうございます。自動でお答えできる内容が見つかりませんでした。\n' +
-    'このメッセージを担当者に送る場合は「担当者に送る」を選択してください。', items)];
+  return [withQuickReply_(INTENT_TEXT.UNMATCHED, items)];
 }

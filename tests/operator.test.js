@@ -96,7 +96,7 @@ test('お問い合わせの種別選択に「オペレーターに相談」（po
   assert.deepEqual(items.slice(0, 5).map((a) => a.data), ['a=inq_cat&c=1', 'a=inq_cat&c=2', 'a=inq_cat&c=3', 'a=inq_cat&c=4', 'a=inq_cat&c=5']);
   assert.equal(items[5].label, 'オペレーターに相談');
   assert.equal(items[5].data, 'a=inq_operator');
-  assert.match(m.text, /「オペレーターに相談」/);
+  assert.equal(m.text, '🚁 お問い合わせありがとうございます。\nご希望の内容を下記よりお選びくださいませ。');
 });
 
 /* ---------- 2〜6. 開始・記録・通知 ---------- */
@@ -106,8 +106,8 @@ test('「オペレーターに相談」：受付返信 → 問い合わせ管理
   post(e, postback('a=inq_operator'));
   const r = replies(e);
   assert.equal(r.length, 1);
-  assert.match(replyText(r[0]), /担当者（オペレーター）におつなぎします/);
-  assert.match(replyText(r[0]), /自動応答は停止します/);
+  assert.match(replyText(r[0]), /^💬 担当スタッフへおつなぎいたします。/);
+  assert.match(replyText(r[0]), /自動返信を一時停止いたします/);
   const rows = e.rows(SHEET);
   assert.equal(rows.length, 1);
   assert.match(rows[0]['受付ID'], /^INQ-\d{8}-0001$/);
@@ -281,7 +281,7 @@ test('通知テンプレート OPERATOR_START が ON なら、その文面＋受
   e.sheets['通知テンプレート'].data.push(['OPERATOR_START', 'オペレーター対応開始', '', 'スタッフにおつなぎします。', 'ON', '']);
   post(e, postback('a=inq_operator'));
   const t = replyText(replies(e)[0]);
-  assert.match(t, /^スタッフにおつなぎします。\n\n受付ID：INQ-/);
+  assert.match(t, /^スタッフにおつなぎします。\n\n🔖 受付ID：INQ-\d{8}-0001$/);
 });
 
 /* ---------- 偽装イベント（GAS単体＝署名未検証） ---------- */

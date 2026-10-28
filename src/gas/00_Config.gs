@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-10-21.7-autoreply-flag',
+  BUILD: '2026-10-28.1-messages',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',
@@ -143,10 +143,11 @@ var PROP_KEYS = {
 };
 
 /** 既定の友だち追加メッセージ（通知テンプレート WELCOME が有効ならそちらを優先） */
+// 通知テンプレート「WELCOME」が ON のときはそちらを使う（これは OFF・未登録時の予備の文面）
 var DEFAULT_WELCOME_MESSAGE =
-  'SKY STANDARD公式LINEへようこそ。\n\n' +
-  'ヘリコプター遊覧飛行・チャーターサービスをご案内しています。\n\n' +
-  'フライトのご予約、予約確認、お問い合わせは、画面下のメニューからご利用ください。';
+  '🚁 SKY STANDARD公式LINEへようこそ。\n' +
+  'ご登録いただき、誠にありがとうございます。\n\n' +
+  '空の旅に関するご相談は、画面下のメニューよりお気軽にお申し付けくださいませ。✨';
 
 /** 設定エラー（未設定時に安全停止させるための専用例外） */
 function ConfigError(message, missingKeys) {

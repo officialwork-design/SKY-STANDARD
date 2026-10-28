@@ -28,15 +28,16 @@ var EVENT_TYPES = {
 
 /** 不足時に「通知テンプレート」へ追加するテンプレート（文面確認のため 有効=OFF で追加） */
 var DEFAULT_TEMPLATES = [
+  // 本文は管理台帳（2026-10-28 時点）の承認済み文面と同じ。シートに行がある場合は追加・上書きしない
   { id: 'BOOKING_CHANGED', use: '予約変更', timing: '予約サイトで変更時',
-    body: 'ご予約内容が変更されました。予約ID：{{予約ID}}／搭乗日時：{{搭乗日時}}。詳細は予約確認からご覧ください。' },
+    body: '🗓️【SKY STANDARD｜ご予約内容変更のご案内】\n\nご予約内容の変更を承りました。\n\n🔖 予約ID：{{予約ID}}\n📅 変更後の搭乗日時：{{搭乗日時}}\n\n変更内容の詳細は、予約確認ページにてご確認くださいませ。\n\n引き続き、どうぞよろしくお願いいたします。✨\n\nSKY STANDARD' },
   { id: 'BOOKING_CANCELLED', use: 'キャンセル', timing: '予約サイトでキャンセル時',
-    body: 'ご予約のキャンセルを承りました。予約ID：{{予約ID}}。キャンセル条件・返金については予約確認ページをご確認ください。' },
+    body: '📋【SKY STANDARD｜キャンセル受付のご案内】\n\nご予約のキャンセルを承りました。\n\n🔖 予約ID：{{予約ID}}\n\nキャンセル条件や返金に関するご案内は、予約確認ページにてご確認くださいませ。\n\nまたの機会に、空の旅をご案内できますことを心よりお待ちしております。🚁\n\nSKY STANDARD' },
   { id: 'PAYMENT_COMPLETED', use: '決済完了', timing: '予約サイトで決済完了時',
-    body: 'お支払いが完了しました。予約ID：{{予約ID}}。ご予約の状態は予約確認ページでご確認いただけます。' },
-  // 「オペレーターに相談」選択時の返信（ON の場合のみ使用。末尾に受付IDが自動で付く。OFF なら 12_Operator.gs の既定文）
+    body: '💳【SKY STANDARD｜お支払い完了のご案内】\n\nお支払いのお手続きが完了いたしました。\n\n🔖 予約ID：{{予約ID}}\n\nご予約の確定状況やフライトの詳細は、予約確認ページにてご確認いただけます。\n\nこの度は誠にありがとうございます。✨\n\nSKY STANDARD' },
+  // 「オペレーターに相談」選択時の返信（ON の場合のみ使用。{{受付ID}} が使える。なければ末尾に受付IDが付く。OFF なら 12_Operator.gs の既定文）
   { id: 'OPERATOR_START', use: 'オペレーター対応開始', timing: 'お問い合わせで「オペレーターに相談」を選択時',
-    body: '担当者（オペレーター）におつなぎします。\nこのトークにご相談内容をお送りください。担当者が確認のうえ、このトークで順次返信いたします。\n\n※担当者の対応が終わるまで、自動応答は停止します。' }
+    body: '💬【SKY STANDARD｜コンシェルジュへのご相談】\n\nお問い合わせいただき、誠にありがとうございます。\n\nただいま担当スタッフへおつなぎしております。\n\n📝 ご相談内容をこのトークにお送りください。確認のうえ、担当者より順次ご返信いたします。\n\n※担当者による対応中は、自動返信を一時停止いたします。\n\nSKY STANDARD' }
 ];
 
 var SEND_RESULT = {
@@ -202,7 +203,7 @@ function deliver_(sendId, row, n, retryCount) {
   if (!result) {
     var messages = [{ type: 'text', text: renderTemplate_(body, n.vars) }];
     var checkUrl = getBookingCheckUrl_();
-    if (checkUrl) messages = messages.concat(buildLinkMessage_('ご予約の詳細はこちら', '予約確認', checkUrl));
+    if (checkUrl) messages = messages.concat(buildLinkMessage_('🔖 ご予約の詳細は、下記よりご確認いただけます。', '予約確認', checkUrl));
     try {
       pushMessage_(n.userId, messages, deterministicUuid_(n.idempotencyKey));
       result = SEND_RESULT.SUCCESS;

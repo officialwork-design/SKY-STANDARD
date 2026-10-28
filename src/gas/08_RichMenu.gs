@@ -47,10 +47,11 @@ var RICHMENU_ITEMS = [
 
 /** 準備中ボタンの既定の返信（通知テンプレート MENU_PENDING_<KEY> が有効ならそちらを優先） */
 var RICHMENU_PENDING_TEXT = {
-  BOOKING: '「フライト予約」は現在準備中です。\nオンライン予約の受付開始まで、今しばらくお待ちください。\nご予約のご相談は「お問い合わせ」から承ります。',
-  BOOKING_CHECK: '「予約確認」は現在準備中です。\nご予約内容の確認・変更のご相談は「お問い合わせ」から承ります。',
-  PLANS: '「プラン一覧」は現在準備中です。\nプランの詳細は公開まで今しばらくお待ちください。ご不明な点は「お問い合わせ」からどうぞ。',
-  CHARTER: '「チャーター」は現在準備中です。\nチャーターのご相談・お見積りは「お問い合わせ」→「チャーター見積」から承ります。'
+  // 返信にはクイックリプライ（お問い合わせ・よくある質問、チャーターは見積も）が付くため、本文ではボタン名を繰り返さない
+  BOOKING: '🚁 フライトのご予約は、現在準備中でございます。\nオンライン予約の開始まで、今しばらくお待ちくださいませ。ご予約のご相談は、下記より承ります。',
+  BOOKING_CHECK: '🔖 予約確認ページは、現在準備中でございます。\nご予約内容の確認・変更のご相談は、下記より承ります。',
+  PLANS: '✨ プラン一覧は、現在準備中でございます。\n公開まで今しばらくお待ちくださいませ。ご不明な点は、下記よりお気軽にどうぞ。',
+  CHARTER: '🚁 チャーターのご案内ページは、現在準備中でございます。\nご相談・お見積りは、下記より承ります。'
 };
 
 /** 各ボタンの現在の URL（未設定は ''） */
@@ -123,10 +124,10 @@ function buildRichMenuPendingReply_(item) {
   var it = richMenuItemOf_(item);
   var quick = [postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ'), messageAction_('よくある質問', 'FAQ')];
   if (!it || it.text) {
-    return [withQuickReply_('このメニューは現在準備中です。お手数ですが「お問い合わせ」からご連絡ください。', quick)];
+    return [withQuickReply_('🚁 このメニューは、現在準備中でございます。\nご不明な点は、下記よりお気軽にご相談くださいませ。', quick)];
   }
   var url = richMenuUrlOf_(it.key);
-  if (url) return buildLinkMessage_('「' + it.name + '」はこちらからご利用いただけます。', it.name, url);
+  if (url) return buildLinkMessage_('✨ 「' + it.name + '」は、下記よりご利用いただけます。', it.name, url);
   var text = getTemplate_('MENU_PENDING_' + it.key) || RICHMENU_PENDING_TEXT[it.key];
   if (it.key === 'CHARTER') quick.unshift(postbackAction_('チャーター見積', 'a=inq_cat&c=4', 'チャーター見積'));
   return [withQuickReply_(text, quick)];

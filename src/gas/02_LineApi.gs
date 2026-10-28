@@ -128,11 +128,14 @@ function deterministicUuid_(seed) {
 /**
  * URI ボタン付きのテキスト（URL 未設定ならボタンを付けず「準備中」の案内のみ）。
  * ボタンテンプレートの本文上限(160字)を超える場合はテキスト＋ボタンの2通に分ける。
+ * URL 未設定のときは、ページがあるかのような案内（text）は出さず、pendingText（なければ既定の準備中案内）だけを返す。
+ * @param {string=} pendingText URL 未設定時の文面
  * @return {Object[]} メッセージ配列
  */
-function buildLinkMessage_(text, label, url) {
+function buildLinkMessage_(text, label, url, pendingText) {
   if (!url) {
-    return [{ type: 'text', text: text + '\n\n※ ' + label + 'のページは現在準備中です。お問い合わせはメニューの「お問い合わせ」からどうぞ。' }];
+    return [{ type: 'text', text: pendingText || ('🚁 「' + label + '」のページは、現在準備中でございます。\n' +
+      '恐れ入りますが、公開まで今しばらくお待ちくださいませ。') }];
   }
   var short = text.length <= 160;
   var button = {

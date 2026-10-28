@@ -44,9 +44,21 @@ var OPERATOR = {
   NOTE_ACTIVE: 'オペレーター対応（自動返信有効=FALSE）'
 };
 
-var DEFAULT_OPERATOR_START_TEXT = '担当者（オペレーター）におつなぎします。\n' +
-  'このトークにご相談内容をお送りください。担当者が確認のうえ、このトークで順次返信いたします。\n\n' +
-  '※担当者の対応が終わるまで、自動応答は停止します。';
+/**
+ * 「オペレーターに相談」選択時の返信（通知テンプレート OPERATOR_START が OFF・未登録のときに使う予備の文面）。
+ * {{受付ID}} は受付IDに置き換える。テンプレートに {{受付ID}} がない場合は末尾に受付IDを付ける。
+ */
+var DEFAULT_OPERATOR_START_TEXT = '💬 担当スタッフへおつなぎいたします。\n' +
+  'ご相談内容をこのトークにお送りくださいませ。確認のうえ、担当者より順次ご返信いたします。\n\n' +
+  '※担当者の対応中は、自動返信を一時停止いたします。\n' +
+  '🔖 受付ID：{{受付ID}}';
+
+/** 受付返信の本文（テンプレート優先。{{受付ID}} の差し込み、なければ末尾に付与） */
+function operatorStartText_(id) {
+  var body = getTemplate_('OPERATOR_START') || DEFAULT_OPERATOR_START_TEXT;
+  if (/\{\{\s*受付ID\s*\}\}/.test(body)) return renderTemplate_(body, { '受付ID': id });
+  return body + '\n\n🔖 受付ID：' + id;
+}
 
 /* ---------- 自動返信有効（シート）の判定 ---------- */
 
@@ -242,7 +254,7 @@ function startOperatorHandoff_(ev, userId) {
   if (getOperatorState_(userId)) return null; // 通常は dispatchEvent_ で止まるため到達しない（二重登録しない）
 
   var id = reserveInquiryId_();
-  var text = (getTemplate_('OPERATOR_START') || DEFAULT_OPERATOR_START_TEXT) + '\n\n受付ID：' + id;
+  var text = operatorStartText_(id);
   var replyError = null;
   try {
     replyMessage_(ev.replyToken, text);

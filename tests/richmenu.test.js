@@ -109,10 +109,11 @@ function tap(e, data) {
 
 test('準備中ボタンをタップすると項目名に応じた「現在準備中です」を返信', () => {
   const e = env();
-  const expect = { BOOKING: 'フライト予約', BOOKING_CHECK: '予約確認', PLANS: 'プラン一覧', CHARTER: 'チャーター' };
+  const expect = { BOOKING: /^🚁 フライトのご予約は、現在準備中でございます。/, BOOKING_CHECK: /^🔖 予約確認ページは、現在準備中でございます。/,
+    PLANS: /^✨ プラン一覧は、現在準備中でございます。/, CHARTER: /^🚁 チャーターのご案内ページは、現在準備中でございます。/ };
   Object.keys(expect).forEach((k) => {
     const m = tap(e, 'a=menu_unset&item=' + k)[0];
-    assert.match(m.text, new RegExp('^「' + expect[k] + '」は現在準備中です。'));
+    assert.match(m.text, expect[k]);
     assert.ok(m.quickReply.items.some((i) => i.action.data === 'a=inq_start'));
   });
   const charter = tap(e, 'a=menu_unset&item=CHARTER')[0];
@@ -122,9 +123,9 @@ test('準備中ボタンをタップすると項目名に応じた「現在準�
 
 test('旧形式（item=表示名）にも対応し、未知の item は文面に反映しない', () => {
   const e = env();
-  assert.match(tap(e, 'a=menu_unset&item=' + encodeURIComponent('プラン一覧'))[0].text, /^「プラン一覧」は現在準備中です/);
+  assert.match(tap(e, 'a=menu_unset&item=' + encodeURIComponent('プラン一覧'))[0].text, /^✨ プラン一覧は、現在準備中でございます。/);
   const m = tap(e, 'a=menu_unset&item=' + encodeURIComponent('<偽の案内>こちらへ'))[0];
-  assert.equal(m.text, 'このメニューは現在準備中です。お手数ですが「お問い合わせ」からご連絡ください。');
+  assert.equal(m.text, '🚁 このメニューは、現在準備中でございます。\nご不明な点は、下記よりお気軽にご相談くださいませ。');
 });
 
 test('URL を設定後、LINE 側の再登録前に準備中ボタンがタップされたらリンクを案内', () => {
@@ -147,7 +148,7 @@ test('リッチメニューの「お問い合わせ」「よくある質問」�
   assert.deepEqual(r.quickReply.items.map((i) => i.action.label), ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ', 'オペレーターに相談']);
   e.doPost(relayEnvelope({ destination: BOT, events: [{ type: 'message', webhookEventId: 'q2', replyToken: 'rt2', source: { type: 'user', userId: USER }, message: { type: 'text', text: 'FAQ' } }] }, 'r'));
   r = e.linePosts('/v2/bot/message/reply').pop().json.messages[0];
-  assert.match(r.text, /よくある質問/);
+  assert.match(r.text, /よくあるご質問/);
   assert.ok(r.quickReply.items.some((i) => i.action.data === 'a=faq&id=F001'));
 });
 

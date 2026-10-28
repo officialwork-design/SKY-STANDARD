@@ -319,7 +319,7 @@ function dispatchEvent_(ev) {
       return handleUnfollow_(userId);
     case 'message':
       if (ev.message && ev.message.type === 'text') return handleTextMessage_(ev, userId, ev.message.text);
-      return replyMessage_(ev.replyToken, 'メッセージありがとうございます。恐れ入りますが、テキストでお送りいただくか、画面下のメニューをご利用ください。');
+      return replyMessage_(ev.replyToken, MSG_NON_TEXT);
     case 'postback':
       return handlePostback_(ev, userId, ev.postback && ev.postback.data);
     default:
@@ -387,7 +387,7 @@ function handlePostback_(ev, userId, data) {
     case 'inq_cat':
       return startInquiry_(ev, userId, p.c);
     case 'inq_cancel':
-      var r = replyMessage_(ev.replyToken, 'お問い合わせの入力を取り消しました。');
+      var r = replyMessage_(ev.replyToken, MSG_INQUIRY_CANCELLED);
       if (__replySent || isVerifiedEvent_()) clearInquiryState_(userId);
       return r;
     case 'inq_handoff':
@@ -406,6 +406,12 @@ function handlePostback_(ev, userId, data) {
       logInfo_('postback.unknown', { a: String(p.a || '').substring(0, 20) });
   }
 }
+
+/** テキスト以外（画像・スタンプ等）を受け取ったとき */
+var MSG_NON_TEXT = '📩 メッセージをお送りいただき、ありがとうございます。\n' +
+  '恐れ入りますが、文字でお送りいただくか、画面下のメニューをご利用くださいませ。';
+/** お問い合わせの入力を取り消したとき */
+var MSG_INQUIRY_CANCELLED = '✅ お問い合わせの入力を取り消しました。\nまたいつでもお気軽にご相談くださいませ。';
 
 /** 応答成功後に実行する処理（未検証イベントの記録を応答トークン確認後に限定するため） */
 var __pendingAfterReply = null;

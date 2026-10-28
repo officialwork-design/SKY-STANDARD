@@ -20,6 +20,9 @@ var INQUIRY_CATEGORIES = {
   '5': { label: 'その他のお問い合わせ', important: false }
 };
 
+/** お問い合わせ開始（種別選択）の本文。選択肢はクイックリプライのボタンで表示する */
+var MSG_INQUIRY_MENU = '🚁 お問い合わせありがとうございます。\nご希望の内容を下記よりお選びくださいませ。';
+
 /** 種別選択メッセージ */
 function buildInquiryCategoryMessage_() {
   var items = Object.keys(INQUIRY_CATEGORIES).map(function (k) {
@@ -28,9 +31,8 @@ function buildInquiryCategoryMessage_() {
   });
   // 有人対応（12_Operator.gs）。選択すると担当者が LINE のチャット画面から返信し、その間は自動応答を停止する
   items.push(postbackAction_(OPERATOR_MENU_LABEL, 'a=inq_operator', OPERATOR_MENU_LABEL));
-  return withQuickReply_('お問い合わせありがとうございます。\nお問い合わせの種類を下から選択してください。\n\n' +
-    Object.keys(INQUIRY_CATEGORIES).map(function (k) { return k + '. ' + INQUIRY_CATEGORIES[k].label; }).join('\n') +
-    '\n\n担当者と直接やりとりしたい場合は「' + OPERATOR_MENU_LABEL + '」を選択してください。', items);
+  // 選択肢はボタンに表示されるため、本文には繰り返さない
+  return withQuickReply_(MSG_INQUIRY_MENU, items);
 }
 
 function getInquiryState_(userId) {
@@ -51,9 +53,9 @@ function startInquiry_(ev, userId, categoryKey) {
   var cat = INQUIRY_CATEGORIES[categoryKey];
   if (!cat || !userId) return replyMessage_(ev.replyToken, buildInquiryCategoryMessage_());
   var guide = categoryKey === '4'
-    ? '【チャーター見積】\nご希望日・人数・出発地／目的地・ご予算などを、1通のメッセージでお送りください。'
-    : '【' + cat.label + '】\nお問い合わせ内容を1通のメッセージでお送りください。' +
-      (categoryKey === '2' ? '\n予約番号をお持ちの場合は併せてご記入ください。' : '');
+    ? '📩【チャーター見積】\nご希望日・人数・出発地／目的地・ご予算などを、1通のメッセージでお送りくださいませ。'
+    : '📩【' + cat.label + '】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。' +
+      (categoryKey === '2' ? '\n🔖 予約番号をお持ちの場合は、併せてご記入ください。' : '');
   // 応答が LINE に受理されてから入力待ち状態にする（偽装イベントで他人の状態を変えさせない）
   var res = replyMessage_(ev.replyToken, withQuickReply_(guide, [postbackAction_('入力をやめる', 'a=inq_cancel', '入力をやめる')]));
   if (__replySent || isVerifiedEvent_()) setInquiryState_(userId, { c: categoryKey });
@@ -161,8 +163,8 @@ function replyReceivedSafely_(ev, id) {
 }
 
 function inquiryReceivedText_(id) {
-  return 'お問い合わせを受け付けました。\n受付ID：' + id + '\n\n内容を確認のうえ、担当者より順次ご連絡いたします。' +
-    '追加のご連絡がある場合は、受付IDを添えてお送りください。';
+  return '✅ お問い合わせを承りました。\n🔖 受付ID：' + id + '\n\n内容を確認のうえ、担当者より順次ご連絡いたします。' +
+    '追加のご連絡は、受付IDを添えてお送りくださいませ。';
 }
 
 /** 問い合わせを保存して受付IDを返す */
