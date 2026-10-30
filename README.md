@@ -60,6 +60,7 @@ LINE公式アカウント（`@686mdyho`）は、リッチメニュー4領域で�
 
 - 画像は Google ドライブ「空と都市を巡るヘリチャーター案内.png」（ID `17JrCm0unhRnSG2En65jmVSl116Sq4ipf`、1543×1019）。ID管理 `RICHMENU_IMAGE_FILE_ID` にこの ID を入力します（2026-10-30 時点では旧画像の ID のまま）。
 - 2.2MB の PNG のため、登録時に GAS が JPEG に変換します（元画像は変更しません）。
+- テスト環境の `testMakeRichMenuImage` で、同じフォルダに 1MB 以下の JPEG（`空と都市を巡るヘリチャーター案内_LINE用.jpg`）を別名で作成できます。本番でもこの JPEG の ID を `RICHMENU_IMAGE_FILE_ID` に使えば、登録時の変換は不要です。
 - 画像のデザインを変えたら、`src/gas/08_RichMenu.gs` の `RICHMENU_SIZE` と `RICHMENU_GRID`（区切り線の位置）を合わせて更新し、テストを実行します。
 
 ### LINE リッチメニューの切替手順（本番。承認後に実施）
@@ -80,7 +81,10 @@ npm test                                   # すべてのモックテスト
 node --test tests/reservation-check.test.js # 予約確認フロー
 node --test tests/richmenu.test.js          # リッチメニュー（4領域・画像）
 node --test tests/operator.test.js          # お問い合わせ・有人対応
+npm run test-env:scenario                  # 実機確認と同じ操作をモックで通しで実行（結果を表示）
 ```
+
+テスト用 LINE チャネル・テスト用 GAS での実機確認は [docs/test-env.md](docs/test-env.md)（`npm run test-env:build` で一式を出力）。
 
 ### GAS のデプロイ手順
 

@@ -64,12 +64,14 @@ function fmtDate(date, tz, fmt) {
     .replace('HH', parts.hour).replace('mm', parts.minute).replace('ss', parts.second);
 }
 
-function createSheet(name, data) {
+function createSheet(name, data, onRename) {
   const fmt = { frozenRows: 0, filter: null, rules: [], validations: [], widths: {}, headerStyle: {} };
+  let curName = name;
   const sheet = {
     data,
     fmt,
-    getName: () => name,
+    getName: () => curName,
+    setName(n) { if (onRename) onRename(curName, n); curName = n; return sheet; },
     getMaxRows: () => 1000,
     setFrozenRows(n) { fmt.frozenRows = n; },
     getFilter: () => fmt.filter,
@@ -154,8 +156,30 @@ function createGasEnv(opts = {}) {
     insertSheet: (n) => { if (opts.failInsert) throw new Error('insert failed'); sheetsData[n] = []; sheets[n] = createSheet(n, sheetsData[n]); return sheets[n]; },
     getSpreadsheetTimeZone: () => 'Asia/Tokyo',
     getId: () => '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es',
+    getUrl: () => 'https://docs.google.com/spreadsheets/d/1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es/edit',
     getOwner: () => ({ getEmail: () => opts.owner || 'owner@example.com' })
   };
+  /** SpreadsheetApp.create で作られたスプレッドシート（テスト環境キットの検証用） */
+  const created = {};
+  function newSpreadsheet(title) {
+    const id = '1TEST' + crypto.randomBytes(20).toString('hex');
+    const own = {};
+    const rename = (from, to) => { own[to] = own[from]; delete own[from]; };
+    own['シート1'] = createSheet('シート1', [], rename);
+    const s2 = {
+      title, sheets: own,
+      getSheets: () => Object.values(own),
+      getSheetByName: (n) => own[n] || null,
+      insertSheet: (n) => { own[n] = createSheet(n, [], rename); return own[n]; },
+      getSpreadsheetTimeZone: () => 'Asia/Tokyo',
+      getId: () => id,
+      getUrl: () => 'https://docs.google.com/spreadsheets/d/' + id + '/edit',
+      getOwner: () => ({ getEmail: () => opts.owner || 'owner@example.com' })
+    };
+    created[id] = s2;
+    return s2;
+  }
+  const driveFiles = Object.assign({}, opts.driveFiles || {});
 
   const ctx = {
     console: {
@@ -167,7 +191,8 @@ function createGasEnv(opts = {}) {
     Date, JSON, Math, Object, Array, String, Number, Error, RegExp, Intl, isFinite, parseInt, parseFloat,
     encodeURIComponent, decodeURIComponent,
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => (opts.noActive ? null : ss), openById: () => ss, getUi: () => { throw new Error('no ui'); },
+      getActiveSpreadsheet: () => (opts.noActive ? null : ss), openById: (id) => created[id] || ss,
+      create: (title) => newSpreadsheet(title), getUi: () => { throw new Error('no ui'); },
       newConditionalFormatRule: () => {
         const rule = {};
         const b = {
@@ -209,7 +234,7 @@ function createGasEnv(opts = {}) {
     },
     Utilities: {
       Charset: { UTF_8: 'UTF-8' },
-      DigestAlgorithm: { SHA_256: 'sha256' },
+      DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' },
       computeHmacSha256Signature: (value, key) => toSigned(crypto.createHmac('sha256', toBuf(key)).update(toBuf(value)).digest()),
       computeDigest: (alg, value) => toSigned(crypto.createHash(alg).update(toBuf(value)).digest()),
       base64Encode: (bytes) => toBuf(bytes).toString('base64'),
@@ -227,7 +252,8 @@ function createGasEnv(opts = {}) {
       getEffectiveUser: () => ({ getEmail: () => env.user })
     },
     ScriptApp: {
-      getScriptId: () => '1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff',
+      getScriptId: () => opts.scriptId || '1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff',
+      getService: () => ({ getUrl: () => opts.webAppUrl || null }),
       getProjectTriggers: () => triggers.slice(),
       deleteTrigger: (t) => { triggers.splice(triggers.indexOf(t), 1); },
       newTrigger: (fn) => {
@@ -237,39 +263,62 @@ function createGasEnv(opts = {}) {
       }
     },
     DriveApp: {
-      getFileById: (id) => {
-        const f = (opts.driveFiles || {})[id];
-        if (!f) throw new Error('File not found: ' + id);
-        return {
-          getName: () => f.name,
-          getBlob: () => {
-            const mkBlob = (bytes, ct) => {
-              const blob = {
-                contentType: ct,
-                getBytes: () => Array.from(bytes).map((b) => (b > 127 ? b - 256 : b)),
-                getContentType: () => blob.contentType,
-                setContentType(t) { blob.contentType = t; return blob; },
-                // Blob.getAs（画像形式の変換）。f.asJpeg に変換後のバイト列を用意したときだけ成功する
-                getAs(t) {
-                  if (t !== 'image/jpeg' || !f.asJpeg) throw new Error('conversion not supported in mock');
-                  return mkBlob(f.asJpeg, 'image/jpeg');
-                }
-              };
-              return blob;
-            };
-            return mkBlob(f.bytes, f.contentType);
-          }
-        };
-      }
-    }
+      getRootFolder: () => folderOf('root'),
+      getFileById: (id) => fileOf(id)
+    },
+    Logger: { log: (m) => { logs.push(String(m)); } }
   };
+  /** Drive のモック。f = { name, bytes, contentType, asJpeg?, folder?, updated? } */
+  function folderOf(fid) {
+    const iter = (arr) => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
+    return {
+      getId: () => fid,
+      getName: () => (fid === 'root' ? 'マイドライブ' : fid),
+      getFilesByName: (n) => iter(Object.keys(driveFiles).filter((k) => driveFiles[k].name === n && (driveFiles[k].folder || 'root') === fid).map(fileOf)),
+      createFile(blob) {
+        const id = 'f' + crypto.randomBytes(16).toString('hex');
+        driveFiles[id] = { name: blob.name, bytes: toBuf(blob.getBytes()), contentType: blob.getContentType(), folder: fid, updated: Date.now() };
+        return fileOf(id);
+      }
+    };
+  }
+  function fileOf(id) {
+    const f = driveFiles[id];
+    if (!f) throw new Error('File not found: ' + id);
+    return {
+      getId: () => id,
+      getName: () => f.name,
+      getLastUpdated: () => new Date(f.updated || 1761000000000),
+      getParents: () => { let done = false; return { hasNext: () => !done, next: () => { done = true; return folderOf(f.folder || 'root'); } }; },
+      getBlob: () => {
+        const mkBlob = (bytes, ct) => {
+          const blob = {
+            contentType: ct,
+            name: f.name,
+            getBytes: () => Array.from(bytes).map((b) => (b > 127 ? b - 256 : b)),
+            getContentType: () => blob.contentType,
+            setContentType(t) { blob.contentType = t; return blob; },
+            setName(n) { blob.name = n; return blob; },
+            // Blob.getAs（画像形式の変換）。f.asJpeg に変換後のバイト列を用意したときだけ成功する
+            getAs(t) {
+              if (t !== 'image/jpeg' || !f.asJpeg) throw new Error('conversion not supported in mock');
+              return mkBlob(f.asJpeg, 'image/jpeg');
+            }
+          };
+          return blob;
+        };
+        return mkBlob(f.bytes, f.contentType);
+      }
+    };
+  }
   vm.createContext(ctx);
   fs.readdirSync(GAS_DIR).filter((f) => f.endsWith('.gs')).sort().forEach((f) => {
     vm.runInContext(fs.readFileSync(path.join(GAS_DIR, f), 'utf8'), ctx, { filename: f });
   });
+  (opts.extraFiles || []).forEach((f) => vm.runInContext(fs.readFileSync(f, 'utf8'), ctx, { filename: path.basename(f) }));
 
   return {
-    ctx, sheets, props, cache, fetchCalls, logs, mails, env, triggers,
+    ctx, sheets, props, cache, fetchCalls, logs, mails, env, triggers, created, driveFiles,
     setUser(u) { env.user = u; },
     setFetch(fn) { fetchHandler = fn; },
     /** シートの行をオブジェクト配列で取得 */

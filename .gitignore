@@ -8,3 +8,4 @@ src/web/booking/config.json
 tests/e2e/*.png
 *.log
 .DS_Store
+build/
