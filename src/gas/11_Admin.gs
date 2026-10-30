@@ -281,7 +281,7 @@ function adminSetupSheets_() {
     '・ID管理に追加した設定キー：' + (r.idKeys.join('、') || 'なし'),
     '・追加した通知テンプレート（有効=OFF）：' + (r.templates.join('、') || 'なし'),
     '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み'),
-    '・問い合わせ管理の選択肢（対応状況：未対応／対応中／対応完了、自動返信有効：TRUE／FALSE）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
+    '・問い合わせ管理の選択肢（対応状況：未対応／対応中／お客様回答待ち／見積・社内確認中／完了／キャンセル・取下げ、自動返信有効：TRUE／FALSE）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
     '\n既存のデータ・行は変更していません。'
   ];
   if (r.missingSheets.length) msg.unshift('【注意】次のシートが見つかりません（自動作成はしません）：' + r.missingSheets.join('、'));
@@ -414,15 +414,18 @@ function adminCheckLine_(p) {
 /**
  * リッチメニュー設定確認（LINE には何も登録しない）。
  *   - 各ボタンの動作（リンク／準備中表示／メッセージ送信）とタップ領域
- *   - 画像の検査（形式・1MB 以下・2500×1686px）
+ *   - 画像の検査（形式・1MB 以下（PNG は JPEG 変換後）・1543×1019px）
  *   - LINE 側の既定メニューとの差分（URL を設定した後に再登録が必要か）
  */
 function adminRichMenuCheck_() {
   var built = buildRichMenuDefinition_();
   var lines = built.definition.areas.map(function (a) {
     var act = a.action, b = a.bounds;
-    var to = act.type === 'uri' ? 'リンク ' + act.uri : act.type === 'message' ? 'メッセージ「' + act.text + '」を送信' : '「現在準備中です」を返信（URL 未設定）';
-    return (act.type === 'postback' ? '【準備中】' : '【OK】') + act.label + ' → ' + to +
+    var pending = act.type === 'postback' && /^a=menu_unset/.test(act.data);
+    var to = act.type === 'uri' ? 'リンク ' + act.uri : act.type === 'message' ? 'メッセージ「' + act.text + '」を送信'
+      : pending ? '「現在準備中です」を返信（URL 未設定）'
+      : act.data === 'a=rsv_start' ? 'LINE トークで予約IDの入力を開始' : act.data === 'a=inq_start' ? 'LINE トークでお問い合わせメニューを表示' : 'postback ' + act.data;
+    return (pending ? '【準備中】' : '【OK】') + act.label + ' → ' + to +
       '\n    タップ領域 x:' + b.x + '〜' + (b.x + b.width - 1) + ' / y:' + b.y + '〜' + (b.y + b.height - 1);
   });
   var problems = [];
@@ -433,7 +436,8 @@ function adminRichMenuCheck_() {
   } else {
     var img = validateRichMenuImage_();
     imageLines = img.ok
-      ? ['【OK】' + img.name + '（' + img.type + '・' + img.width + '×' + img.height + 'px・' + Math.round(img.bytes / 1024) + 'KB）']
+      ? ['【OK】' + img.name + '（' + img.type + '・' + img.width + '×' + img.height + 'px・' + Math.round(img.bytes / 1024) + 'KB）' +
+        (img.converted ? '\n    ' + img.converted : '')]
       : img.problems.map(function (p) { return '【NG】' + p; });
     if (!img.ok) problems.push('image');
   }
@@ -449,7 +453,7 @@ function adminRichMenuCheck_() {
     else lineLines = ['【OK】登録済みの内容は現在の設定と一致しています（ID: ' + cmp.richMenuId + '）'];
   }
   var pendingNote = built.unset.length
-    ? '\n準備中のボタン: ' + built.unset.join('、') + '\n予約サイト完成後は「ID管理」シートに URL を入力し、「リッチメニュー登録・更新」を実行するとリンク方式に切り替わります。'
+    ? '\n準備中のボタン: ' + built.unset.join('、') + '\n公式サイト公開後は「ID管理」シートに BOOKING_SITE_URL・FAQ_PAGE_URL を入力し、「リッチメニュー登録・更新」を実行するとリンク方式に切り替わります。'
     : '';
   return { ok: !problems.length, title: 'リッチメニュー設定確認',
     message: '◆ 登録内容（ID管理シートの現在値）\n' + lines.join('\n') + pendingNote +

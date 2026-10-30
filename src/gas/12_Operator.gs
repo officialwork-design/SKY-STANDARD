@@ -6,7 +6,7 @@
  *   TRUE  : Bot の自動返信を行う
  *   FALSE : その顧客への Bot の自動返信をすべて停止する（担当者は LINE Official Account Manager のチャットから返信）
  *   空欄  : 指定なし（判定に使わない）。既存の問い合わせ行は空欄のまま変更しない
- *   新しく作る行には、通常の問い合わせは TRUE、「オペレーターに相談」は FALSE を書き込む。
+ *   新しく作る問い合わせ行は、すべて有人対応への引き継ぎ（handoffToOperator_）のため FALSE を書き込む。
  *
  * ■ 同じ顧客に複数の問い合わせがある場合の優先順位
  *   その顧客（LINEユーザーID）の行のうち、自動返信有効が TRUE / FALSE の行だけを対象に、
@@ -37,27 +37,27 @@
 var OPERATOR = {
   PROP_PREFIX: 'OPERATOR_MODE:',
   CATEGORY_LABEL: 'オペレーター相談',
-  STATUSES: ['未対応', '対応中', '対応完了'],
-  DONE: '対応完了',
+  /** 対応状況の選択肢（記録用。自動返信の有効／停止は「自動返信有効」列だけで決まる） */
+  STATUSES: ['未対応', '対応中', 'お客様回答待ち', '見積・社内確認中', '完了', 'キャンセル・取下げ'],
+  /** 旧版の移行で「対応済み」とみなす値（旧版は「対応完了」を使っていた） */
+  DONE_VALUES: ['完了', '対応完了'],
   COL: '自動返信有効',
   FLAG_VALUES: ['TRUE', 'FALSE'],
   NOTE_ACTIVE: 'オペレーター対応（自動返信有効=FALSE）'
 };
 
 /**
- * 「オペレーターに相談」選択時の返信（通知テンプレート OPERATOR_START が OFF・未登録のときに使う予備の文面）。
- * {{受付ID}} は受付IDに置き換える。テンプレートに {{受付ID}} がない場合は末尾に受付IDを付ける。
+ * 「オペレーターに相談」を選んだときの案内（相談内容の入力を促す）。
+ * 通知テンプレート OPERATOR_START が ON ならその本文を使う（OFF・未登録のときはこの予備の文面）。
+ * 受付IDは相談内容を受け付けたとき（受付完了の返信）に発行する。
  */
-var DEFAULT_OPERATOR_START_TEXT = '💬 担当スタッフへおつなぎいたします。\n' +
-  'ご相談内容をこのトークにお送りくださいませ。確認のうえ、担当者より順次ご返信いたします。\n\n' +
-  '※担当者の対応中は、自動返信を一時停止いたします。\n' +
-  '🔖 受付ID：{{受付ID}}';
+var DEFAULT_OPERATOR_PROMPT_TEXT = '💬 担当スタッフへおつなぎいたします。\n' +
+  'ご相談内容を、このトークに1通のメッセージでお送りくださいませ。';
 
-/** 受付返信の本文（テンプレート優先。{{受付ID}} の差し込み、なければ末尾に付与） */
-function operatorStartText_(id) {
-  var body = getTemplate_('OPERATOR_START') || DEFAULT_OPERATOR_START_TEXT;
-  if (/\{\{\s*受付ID\s*\}\}/.test(body)) return renderTemplate_(body, { '受付ID': id });
-  return body + '\n\n🔖 受付ID：' + id;
+function operatorPromptText_(reservationId) {
+  var body = getTemplate_('OPERATOR_START') || DEFAULT_OPERATOR_PROMPT_TEXT;
+  body = renderTemplate_(body.replace(/\n*.*\{\{\s*受付ID\s*\}\}.*/g, ''), {}); // 受付IDは受付完了の返信で案内する
+  return reservationId ? body + '\n🔖 対象の予約ID：' + reservationId : body;
 }
 
 /* ---------- 自動返信有効（シート）の判定 ---------- */
@@ -162,7 +162,7 @@ function migrateLegacyOperatorRow_(rows, st) {
   if (!st || !st.id) return false;
   var row = rows.filter(function (r) { return String(r['受付ID']) === String(st.id); })[0];
   if (!row || parseAutoReplyFlag_(row[OPERATOR.COL]) !== null) return false;
-  var done = String(row['対応状況'] || '').trim() === OPERATOR.DONE;
+  var done = OPERATOR.DONE_VALUES.indexOf(String(row['対応状況'] || '').trim()) !== -1;
   updateRow_(SHEETS.INQUIRIES, row.__row, (function (p) { p[OPERATOR.COL] = done; return p; })({}));
   row[OPERATOR.COL] = done;
   logInfo_('operator.legacy_migrated', { id: st.id, enabled: done });
@@ -243,18 +243,32 @@ function handleOperatorModeEvent_(ev, userId) {
   logInfo_('operator.auto_reply_suppressed', { type: ev.type, id: st.id, userId: userId, verified: isVerifiedEvent_() });
 }
 
-/* ---------- 「オペレーターに相談」 ---------- */
+/* ---------- 共通：問い合わせの受付と有人対応への引き継ぎ ---------- */
 
 /**
- * 受付返信 → 問い合わせ記録（自動返信有効=FALSE）→ 停止の記録 → 運営通知。
- * 未検証イベントは応答が LINE に受理された場合のみ記録・停止・通知する。
+ * すべての有人対応（チャーター見積・その他のお問い合わせ・オペレーターに相談・担当者に送る）の共通処理。
+ *   1. 同じ Webhook イベントで受付済みなら、同じ受付IDを案内して終了（受付IDを重複発行しない）
+ *   2. 受付IDを発行
+ *   3. 受付完了を1回だけ返信（未検証イベントは返信が LINE に受理された場合のみ次へ進む）
+ *   4.「問い合わせ管理」に保存（対応状況=未対応、自動返信有効=FALSE、LINEイベントID）
+ *   5. 入力待ちを終了し、自動返信の停止を記録（スクリプトプロパティ）
+ *   6. 運営に通知（既存の通知先。新しい通知の仕組みは追加しない）
+ * 以降は担当者が LINE Official Account Manager のチャットで返信し、完了時に自動返信有効を TRUE に戻す。
+ * @param {{category:string, content:string, important?:boolean, note?:string, ack:string}} o
+ * @return {string|null} 受付ID
  */
-function startOperatorHandoff_(ev, userId) {
+function handoffToOperator_(ev, userId, o) {
   if (!userId) return replyMessage_(ev.replyToken, buildInquiryCategoryMessage_());
-  if (getOperatorState_(userId)) return null; // 通常は dispatchEvent_ で止まるため到達しない（二重登録しない）
-
-  var id = reserveInquiryId_();
-  var text = operatorStartText_(id);
+  var eventId = String(ev.webhookEventId || '');
+  var reserved = reserveInquiryIdForEvent_(eventId);
+  var id = reserved.id;
+  if (reserved.dup) {
+    // 同じイベントは受付済み：同じ受付IDを案内するだけ（保存・停止・通知はしない）
+    logInfo_('operator.duplicate_event', { id: id });
+    replyMessage_(ev.replyToken, inquiryReceivedText_(id, o.ack));
+    return id;
+  }
+  var text = inquiryReceivedText_(id, o.ack);
   var replyError = null;
   try {
     replyMessage_(ev.replyToken, text);
@@ -266,21 +280,20 @@ function startOperatorHandoff_(ev, userId) {
     logWarn_('operator.unverified_no_reply', {});
     return null;
   }
-
-  // 入力待ち・未一致メッセージの状態は破棄（停止中は使わない）
-  clearInquiryState_(userId);
-  CacheService.getScriptCache().remove('last:' + userId);
+  clearConversationStates_(userId);
 
   var profile = getProfile_(userId) || {};
   var name = profile.displayName ? String(profile.displayName).substring(0, 50) : '';
-  var saved = true;
+  var saved = true, already = false;
   try {
     withLock_(function () {
+      if (eventId && findInquiryByEventId_(eventId)) { already = true; return; } // 同時実行で先に保存された
       var row = {
-        '受付ID': id, 'LINEユーザーID': userId, '受付日時': nowString_(), '種別': OPERATOR.CATEGORY_LABEL,
-        '内容': 'オペレーター対応の依頼' + (name ? '（LINE表示名：' + name + '）' : '') + '。相談内容は LINE 公式アカウントのチャット画面で確認してください。',
-        '対応状況': '未対応', '担当者': '', '回答日時': '',
-        '備考': [OPERATOR.NOTE_ACTIVE, isVerifiedEvent_() ? '' : 'GAS単体受信（応答トークン確認済み・署名未検証）'].filter(String).join(' / ')
+        '受付ID': id, 'LINEユーザーID': userId, '受付日時': nowString_(), '種別': o.category,
+        '内容': String(o.content || '').substring(0, 5000), '対応状況': '未対応', '担当者': '', '回答日時': '',
+        '備考': [OPERATOR.NOTE_ACTIVE, o.important ? '重要' : '', o.note || '', name ? 'LINE表示名：' + name : '',
+          isVerifiedEvent_() ? '' : 'GAS単体受信（応答トークン確認済み・署名未検証）'].filter(String).join(' / '),
+        'LINEイベントID': eventId
       };
       row[OPERATOR.COL] = false;
       appendRow_(SHEETS.INQUIRIES, row);
@@ -289,21 +302,17 @@ function startOperatorHandoff_(ev, userId) {
     saved = false;
     logError_('operator.save_failed', e, { id: id });
   }
-  // 保存に失敗しても停止は記録する（利用者には「おつなぎします」と返信済みのため）。
+  if (already) return id;
+  // 保存に失敗しても停止は記録する（利用者には受付完了を返信済みのため）。
   // シートに行がない間は自動では再開しない。管理メニューから解除できる。
-  setOperatorState_(userId, { id: id, since: Date.now(), n: 0, by: 'operator_request' });
-  logInfo_('operator.started', { id: id, userId: userId, verified: isVerifiedEvent_() });
+  setOperatorState_(userId, { id: id, since: Date.now(), n: 0, by: 'handoff' });
+  logInfo_('operator.started', { id: id, category: o.category, userId: userId, verified: isVerifiedEvent_() });
 
-  var subject = '【オペレーター対応依頼】' + id;
-  var body = subject + '\n' + (name ? 'LINE表示名：' + name + '\n' : '') + '受付ID：' + id +
-    '\n\nLINE Official Account Manager のチャット画面から、この利用者に返信してください。' +
-    '\nこの利用者への Bot の自動返信は停止しました（問い合わせ管理「自動返信有効」= FALSE）。' +
-    '\n対応が終わったら、この受付IDの行の「自動返信有効」を TRUE にしてください（次のメッセージから自動返信を再開します）。' +
-    (saved ? '' : '\n\n【要対応】問い合わせ管理への保存に失敗しました。手動で行を追加するか、管理メニューから自動返信を再開してください。');
-  if (!notifyAdmin_(subject, body)) {
-    logError_('operator.notify_failed', new Error('オペレーター対応依頼を運営に通知できませんでした（ADMIN_NOTIFY_TARGET / ADMIN_EMAIL を確認）'), { id: id });
+  var sent = notifyInquiry_(id, { label: o.category, important: !!o.important },
+    o.content + (saved ? '' : '\n\n【要対応】問い合わせ管理への保存に失敗しました。手動で行を追加するか、管理メニューから自動返信を再開してください。'));
+  if (!sent) {
+    logError_('operator.notify_failed', new Error('問い合わせを運営に通知できませんでした（ADMIN_NOTIFY_TARGET / ADMIN_EMAIL を確認）'), { id: id });
   }
-
   if (replyError) {
     // 署名検証済みイベントで応答に失敗した場合はプッシュで知らせる（受付済みのため再処理させない）
     logError_('operator.reply_failed', replyError, { id: id });
@@ -312,6 +321,13 @@ function startOperatorHandoff_(ev, userId) {
     catch (e2) { logError_('operator.ack_push_failed', e2, { id: id }); }
   }
   return id;
+}
+
+/** 同じ Webhook イベントで受け付けた問い合わせの受付ID（なければ null） */
+function findInquiryByEventId_(eventId) {
+  if (!eventId) return null;
+  var row = findRow_(SHEETS.INQUIRIES, 'LINEイベントID', eventId);
+  return row ? String(row['受付ID']) : null;
 }
 
 /* ---------- 管理（adminRun から呼ぶ。ADMIN_USERS 確認済み） ---------- */
@@ -458,7 +474,7 @@ function adminOperatorRelease_(inquiryId) {
 }
 
 /**
- * 問い合わせ管理の選択肢：「対応状況」（未対応／対応中／対応完了）と「自動返信有効」（TRUE／FALSE）。
+ * 問い合わせ管理の選択肢：「対応状況」（未対応〜キャンセル・取下げの6種）と「自動返信有効」（TRUE／FALSE）。
  * 既存の値は変更しない（選択肢以外の値も警告のみで残す）。
  * 「自動返信有効」はチェックボックスにしない（空欄が FALSE と表示・解釈され、既存の行がすべて停止扱いになるのを防ぐ）。
  */

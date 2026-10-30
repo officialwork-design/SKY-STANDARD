@@ -17,7 +17,8 @@
  *   この前提で、direct で受けたイベントはすべて「未検証」として扱い、次のように処理を制限する。
  *     - 予約確定・決済完了・キャンセル等の予約状態の変更は Webhook からは一切行わない
  *       （予約サイトからの HMAC 署名付き reservation_event のみ）
- *     - 予約内容・個人情報は Webhook の応答に含めない（予約確認は LIFF＋ID トークン検証のみ）
+ *     - 予約内容は、LINE アカウントに紐づく予約（または予約サイト API で電話番号・メールが一致した予約）だけを、
+       1対1トークの応答（reply）でのみ返す。予約IDだけでは返さない。プッシュでは送らない（06_Reservation.gs）
  *     - 管理者操作は Webhook からは実行できない（管理メニュー＝ライブラリ経由＋ADMIN_USERS のみ）
  *     - 顧客登録・問い合わせ保存・運営通知など「記録や外部通知を伴う処理」は、
  *       先に LINE の応答 API（reply）が成功した場合にのみ実行する（応答トークン確認）。
@@ -308,7 +309,7 @@ function claimEvent_(eventId) {
 function dispatchEvent_(ev) {
   var userId = ev.source && ev.source.userId;
   // オペレーター対応モード中（1対1トーク）は一切自動返信しない。ブロック（unfollow）の記録のみ通常どおり行う。
-  // 「対応完了」になっていればここで解除され、通常の自動応答に戻る（12_Operator.gs）
+  // 「自動返信有効」が TRUE になっていればここで解除され、通常の自動応答に戻る（12_Operator.gs）
   if (userId && ev.source.type === 'user' && ev.type !== 'unfollow' && isOperatorMode_(userId)) {
     return handleOperatorModeEvent_(ev, userId);
   }
@@ -363,17 +364,25 @@ function handleUnfollow_(userId) {
 
 /** テキストメッセージ */
 function handleTextMessage_(ev, userId, text) {
-  // 1) 問い合わせ入力待ちなら受付
-  //    ただしメニュー操作（「予約」「FAQ」等の定型語の完全一致）は入力を取り消してそちらを優先
-  var cancelInquiry = false;
-  if (userId && getInquiryState_(userId)) {
-    if (!matchIntentExact_(normalizeText_(text))) return handleInquiryInput_(ev, userId, text);
-    cancelInquiry = true;
+  // 1) 入力待ち（予約確認の予約ID・本人確認／問い合わせ内容）なら、その入力として受け付ける
+  //    ただしメニュー操作（「予約」「FAQ」等の定型語の完全一致）は入力を取り消してそちらを優先（中断）
+  var cancelInput = false;
+  // 予約確認・問い合わせの入力待ちは1対1トークだけで扱う（グループに予約内容を出さない）
+  if (!isOneToOne_(ev)) userId = null;
+  var mode = getConversationMode_(userId);
+  if (mode === 'reservation' || mode === 'inquiry') {
+    if (!matchIntentExact_(normalizeText_(text))) {
+      return mode === 'reservation' ? handleReservationInput_(ev, userId, text) : handleInquiryInput_(ev, userId, text);
+    }
+    cancelInput = true;
   }
   // 2) キーワード・FAQ 応答（記録・状態変更は応答成功後に実行）
   var messages = buildAutoReply_(text, userId);
   var res = replyMessage_(ev.replyToken, messages);
-  if (cancelInquiry && (__replySent || isVerifiedEvent_())) clearInquiryState_(userId);
+  if (cancelInput && (__replySent || isVerifiedEvent_())) {
+    clearReservationState_(userId);
+    clearInquiryState_(userId);
+  }
   runAfterReply_();
   return res;
 }
@@ -381,7 +390,33 @@ function handleTextMessage_(ev, userId, text) {
 /** postback（data は "a=xxx&k=v" 形式） */
 function handlePostback_(ev, userId, data) {
   var p = parseQuery_(data || '');
+  // 予約確認・問い合わせ受付は1対1トークのみ（グループ・トークルームでは案内だけ）
+  if (!isOneToOne_(ev) && ['rsv_start', 'rsv_change', 'rsv_cancel_req', 'inq_cat', 'inq_operator', 'inq_handoff'].indexOf(p.a) !== -1) {
+    return replyMessage_(ev.replyToken, MSG_ONE_TO_ONE_ONLY);
+  }
+  // メニュー操作（リッチメニュー・FAQ）は入力待ちを中断する（応答が受理された場合のみ）
+  var startsCheck = p.a === 'menu_unset' && (p.item === 'BOOKING_CHECK' || p.item === '予約確認');
+  if (['inq_start', 'menu_unset', 'faq', 'faq_list'].indexOf(p.a) !== -1 && userId && !startsCheck) {
+    var out = dispatchPostback_(ev, userId, p);
+    if (__replySent || isVerifiedEvent_()) {
+      clearReservationState_(userId);
+      clearInquiryState_(userId);
+    }
+    return out;
+  }
+  return dispatchPostback_(ev, userId, p);
+}
+
+function dispatchPostback_(ev, userId, p) {
   switch (p.a) {
+    case 'rsv_start':
+      return startReservationCheck_(ev, userId);
+    case 'rsv_cancel':
+      return cancelReservationCheck_(ev, userId);
+    case 'rsv_change':
+      return handleReservationAction_(ev, userId, 'change', p.rid);
+    case 'rsv_cancel_req':
+      return handleReservationAction_(ev, userId, 'cancel', p.rid);
     case 'inq_start':
       return replyMessage_(ev.replyToken, buildInquiryCategoryMessage_());
     case 'inq_cat':
@@ -393,7 +428,7 @@ function handlePostback_(ev, userId, data) {
     case 'inq_handoff':
       return handoffLastMessage_(ev, userId);
     case 'inq_operator':
-      return startOperatorHandoff_(ev, userId);
+      return startOperatorRequest_(ev, userId, p.rid);
     case 'faq':
       return replyMessage_(ev.replyToken, buildFaqAnswerById_(p.id));
     case 'faq_list':
@@ -401,6 +436,8 @@ function handlePostback_(ev, userId, data) {
     case 'menu_unset':
       // リッチメニューの準備中ボタン（URL 未設定）。返信のみで記録・状態変更はしない
       logInfo_('richmenu.pending_tapped', { item: String(p.item || '').substring(0, 20) });
+      // 旧メニュー（6領域）の「予約確認」は LINE トークでの予約確認を始める
+      if (p.item === 'BOOKING_CHECK' || p.item === '予約確認') return startReservationCheck_(ev, userId);
       return replyMessage_(ev.replyToken, buildRichMenuPendingReply_(p.item));
     default:
       logInfo_('postback.unknown', { a: String(p.a || '').substring(0, 20) });
@@ -410,6 +447,14 @@ function handlePostback_(ev, userId, data) {
 /** テキスト以外（画像・スタンプ等）を受け取ったとき */
 var MSG_NON_TEXT = '📩 メッセージをお送りいただき、ありがとうございます。\n' +
   '恐れ入りますが、文字でお送りいただくか、画面下のメニューをご利用くださいませ。';
+/** グループ・トークルームで予約確認・問い合わせを操作したとき */
+var MSG_ONE_TO_ONE_ONLY = '🔖 ご予約の確認やお問い合わせは、SKY STANDARD とのトーク画面（1対1）にてご利用くださいませ。';
+
+/** 1対1トークのイベントか */
+function isOneToOne_(ev) {
+  return !!(ev && ev.source && ev.source.type === 'user' && ev.source.userId);
+}
+
 /** お問い合わせの入力を取り消したとき */
 var MSG_INQUIRY_CANCELLED = '✅ お問い合わせの入力を取り消しました。\nまたいつでもお気軽にご相談くださいませ。';
 

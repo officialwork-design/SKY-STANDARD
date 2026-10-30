@@ -81,44 +81,55 @@ function addRow(e, id, at, flag, top = false, user = USER, status = '未対応')
   set('対応状況', status); set('自動返信有効', flag);
   if (top) d.splice(1, 0, r); else d.push(r);
 }
-function startOperator(e, u = USER) {
+/** 「オペレーターに相談」→ 相談内容を送信（受付・有人対応へ） */
+function startOperator(e, u = USER, content = 'ヘリの貸切について相談したいです') {
   post(e, postback('a=inq_operator', { userId: u }));
+  post(e, text(content, { userId: u }));
   return opState(e, u).id;
 }
 
 /* ---------- 1. メニュー ---------- */
 
-test('お問い合わせの種別選択に「オペレーターに相談」（postback a=inq_operator）が追加され、既存5種別はそのまま', () => {
+test('お問い合わせの種別選択は4項目（チャーター見積・フライト予約について・その他・オペレーターに相談）', () => {
   const e = env();
   post(e, text('お問い合わせ'));
   const m = replies(e)[0].json.messages[0];
   const items = m.quickReply.items.map((i) => i.action);
-  assert.deepEqual(items.slice(0, 5).map((a) => a.data), ['a=inq_cat&c=1', 'a=inq_cat&c=2', 'a=inq_cat&c=3', 'a=inq_cat&c=4', 'a=inq_cat&c=5']);
-  assert.equal(items[5].label, 'オペレーターに相談');
-  assert.equal(items[5].data, 'a=inq_operator');
+  assert.deepEqual(items.map((a) => [a.label, a.data]), [['チャーター見積', 'a=inq_cat&c=4'], ['フライト予約について', 'a=inq_cat&c=1'],
+    ['その他のお問い合わせ', 'a=inq_cat&c=5'], ['オペレーターに相談', 'a=inq_operator']]);
+  assert.doesNotMatch(JSON.stringify(items), /予約内容の確認・変更|天候・運航/, '予約確認・天候はメニューに重複表示しない');
   assert.equal(m.text, '🚁 お問い合わせありがとうございます。\nご希望の内容を下記よりお選びくださいませ。');
 });
 
 /* ---------- 2〜6. 開始・記録・通知 ---------- */
 
-test('「オペレーターに相談」：受付返信 → 問い合わせ管理に「未対応」「自動返信有効=FALSE」で記録 → 停止を記録 → 運営通知', () => {
+test('「オペレーターに相談」：相談内容の案内 → 内容を受信 → 受付ID発行・保存（未対応・FALSE）→ 受付完了を1回返信 → 停止 → 運営通知', () => {
   const e = env();
   post(e, postback('a=inq_operator'));
-  const r = replies(e);
+  let r = replies(e);
   assert.equal(r.length, 1);
-  assert.match(replyText(r[0]), /^💬 担当スタッフへおつなぎいたします。/);
-  assert.match(replyText(r[0]), /自動返信を一時停止いたします/);
+  assert.equal(replyText(r[0]), '💬 担当スタッフへおつなぎいたします。\nご相談内容を、このトークに1通のメッセージでお送りくださいませ。');
+  assert.equal(e.rows(SHEET).length, 0, '内容を受け取るまで受付しない');
+  assert.equal(opState(e), null);
+  post(e, text('来月の夜景フライトを貸切で相談したいです'));
+  r = replies(e);
+  assert.equal(r.length, 2, '受付完了の返信は1回だけ');
+  const ack = replyText(r[1]);
+  assert.match(ack, /^💬 ご相談内容を承りました。/);
+  assert.match(ack, /自動返信を一時停止いたします/);
   const rows = e.rows(SHEET);
   assert.equal(rows.length, 1);
   assert.match(rows[0]['受付ID'], /^INQ-\d{8}-0001$/);
-  assert.match(replyText(r[0]), new RegExp('受付ID：' + rows[0]['受付ID']));
+  assert.match(ack, new RegExp('受付ID：' + rows[0]['受付ID']));
   assert.equal(rows[0]['LINEユーザーID'], USER);
   assert.equal(rows[0]['種別'], 'オペレーター相談');
+  assert.equal(rows[0]['内容'], '来月の夜景フライトを貸切で相談したいです');
   assert.equal(rows[0]['対応状況'], '未対応');
   assert.equal(rows[0]['自動返信有効'], false);
   assert.equal(e.sheets[SHEET].data[0].indexOf('自動返信有効'), 9, '既存9列の後ろ（末尾）に追加');
-  assert.match(rows[0]['内容'], /LINE表示名：空野 太郎/);
+  assert.match(rows[0]['LINEイベントID'], /^[0-9A-Z]{26}$/);
   assert.match(rows[0]['備考'], /自動返信有効=FALSE/);
+  assert.match(rows[0]['備考'], /LINE表示名：空野 太郎/);
   assert.match(rows[0]['備考'], /署名未検証/);
   const st = opState(e);
   assert.equal(st.id, rows[0]['受付ID']);
@@ -126,20 +137,47 @@ test('「オペレーターに相談」：受付返信 → 問い合わせ管理
   const p = pushes(e);
   assert.equal(p.length, 1);
   assert.equal(p[0].json.to, ADMIN);
-  assert.match(p[0].json.messages[0].text, /【オペレーター対応依頼】INQ-/);
-  assert.match(p[0].json.messages[0].text, /チャット画面から/);
-  assert.match(p[0].json.messages[0].text, /「自動返信有効」を TRUE/);
+  assert.match(p[0].json.messages[0].text, /新しいお問い合わせ\n受付ID：INQ-/);
+  assert.match(p[0].json.messages[0].text, /チャットから返信/);
+  assert.match(p[0].json.messages[0].text, /自動返信有効を TRUE/);
 });
 
-test('通常の問い合わせ（5種別・担当者に送る）は「自動返信有効=TRUE」で記録し、自動返信を続ける', () => {
+test('チャーター見積・その他・担当者に送るも同じ共通処理で受付し、有人対応へ（自動返信有効=FALSE）', () => {
+  for (const [setup, kind, label] of [
+    [(e) => post(e, postback('a=inq_cat&c=4')), /運航条件と料金を確認/, 'チャーター見積'],
+    [(e) => post(e, postback('a=inq_cat&c=5')), /^✅ お問い合わせを承りました。/, 'その他のお問い合わせ']]) {
+    const e = env();
+    setup(e);
+    post(e, text('12/1 4名 東京→箱根 未定あり'));
+    assert.equal(e.rows(SHEET)[0]['種別'], label);
+    assert.equal(e.rows(SHEET)[0]['自動返信有効'], false);
+    assert.match(replyText(replies(e).pop()), kind);
+    const n0 = replies(e).length;
+    post(e, text('予約'));
+    assert.equal(replies(e).length, n0, '受付後は自動返信しない');
+  }
   const e = env();
-  post(e, postback('a=inq_cat&c=4'));
-  post(e, text('12/1 4名 見積希望'));
-  assert.equal(e.rows(SHEET)[0]['自動返信有効'], true);
-  const n0 = replies(e).length;
-  post(e, text('予約'));
-  assert.equal(replies(e).length, n0 + 1);
+  post(e, text('ヘリの座席の色は？'));
+  post(e, postback('a=inq_handoff'));
+  assert.equal(e.rows(SHEET)[0]['内容'], 'ヘリの座席の色は？');
+  assert.equal(e.rows(SHEET)[0]['自動返信有効'], false);
+});
+
+test('フライト予約について：予約サイト（未公開なら準備中）を案内し、受付・停止はしない。希望時のみオペレーターへ', () => {
+  const e = env();
+  post(e, postback('a=inq_cat&c=1'));
+  const m = replies(e).pop().json.messages[0];
+  assert.match(m.text, /オンラインでのご予約受付は、現在準備中でございます/);
+  assert.deepEqual(m.quickReply.items.map((i) => i.action.data), ['a=inq_operator']);
+  assert.equal(e.rows(SHEET).length, 0);
   assert.equal(opState(e), null);
+  assert.equal(e.cache.get('inq:' + USER) || null, null, '入力待ちにしない');
+  const e2 = env();
+  e2.setSetting('BOOKING_SITE_URL', 'https://sky-standard.example/');
+  post(e2, postback('a=inq_cat&c=1'));
+  const msgs = replies(e2).pop().json.messages;
+  assert.equal(msgs[0].template.actions[0].uri, 'https://sky-standard.example/');
+  assert.deepEqual(msgs[msgs.length - 1].quickReply.items.map((i) => i.action.data), ['a=inq_operator']);
 });
 
 test('オペレーター対応中は、テキスト・定型語・FAQ・リッチメニュー・画像・postback のいずれにも自動返信しない', () => {
@@ -149,15 +187,17 @@ test('オペレーター対応中は、テキスト・定型語・FAQ・リッ�
   const pushBefore = pushes(e).length;
   post(e, [text('予約'), text('FAQ'), text('お問い合わせ'), text('料金を教えて'), text('あいうえお'),
     postback('a=menu_unset&item=BOOKING'), postback('a=faq_list'), postback('a=inq_start'), postback('a=inq_operator'),
-    postback('a=inq_cat&c=2'), postback('a=inq_handoff'), ev('message', { message: { type: 'image', id: '9' } })]);
+    postback('a=inq_cat&c=2'), postback('a=inq_handoff'), postback('a=rsv_start'), text('SKY-20261101-A1B2C3'),
+    ev('message', { message: { type: 'image', id: '9' } })]);
   assert.equal(replies(e).length, before, '自動返信していない');
   assert.equal(pushes(e).length, pushBefore, '運営通知・プッシュもしていない');
   assert.equal(e.rows(SHEET).length, 1, '問い合わせを追加登録していない');
   const st = opState(e);
   assert.equal(st.id, id);
-  assert.equal(st.n, 12, '停止した件数を記録');
+  assert.equal(st.n, 14, '停止した件数を記録');
   assert.ok(st.last > 0);
   assert.equal(e.cache.get('inq:' + USER) || null, null, '入力待ち状態にもならない');
+  assert.equal(e.cache.get('rsv:' + USER) || null, null, '予約ID入力も割り込まない');
   // メッセージ本文はログ・プロパティに残さない
   assert.ok(!JSON.stringify(e.props).includes('料金を教えて'));
   assert.ok(e.logs.some((l) => /operator\.auto_reply_suppressed/.test(l)));
@@ -170,9 +210,9 @@ test('FALSE の間は対応状況に関係なく停止を継続し、管理者�
   const n0 = replies(e).length;
   setCell(e, id, '対応状況', '対応中');
   post(e, text('予約'));
-  setCell(e, id, '対応状況', '対応完了');
+  setCell(e, id, '対応状況', '完了');
   post(e, text('予約'));
-  assert.equal(replies(e).length, n0, '対応状況を対応完了にしても FALSE なら停止のまま');
+  assert.equal(replies(e).length, n0, '対応状況を完了にしても FALSE なら停止のまま');
   assert.ok(opState(e));
   setCell(e, id, '自動返信有効', true); // シートで TRUE に変更（チェック値＝boolean）
   post(e, text('予約'));
@@ -185,7 +225,7 @@ test('FALSE の間は対応状況に関係なく停止を継続し、管理者�
   const rows = e.rows(SHEET);
   assert.equal(rows.length, 2);
   assert.equal(rows[1]['種別'], 'チャーター見積');
-  assert.equal(rows[0]['対応状況'], '対応完了', '担当者が設定した値は変更しない');
+  assert.equal(rows[0]['対応状況'], '完了', '担当者が設定した値は変更しない');
 });
 
 test('文字列の "TRUE" / "false"（手入力）も受け付ける', () => {
@@ -202,9 +242,8 @@ test('文字列の "TRUE" / "false"（手入力）も受け付ける', () => {
 
 test('管理者がシートで FALSE にした顧客（オペレーター依頼なし）も停止し、内部記録を作成。TRUE に戻すと削除', () => {
   const e = env();
-  post(e, postback('a=inq_cat&c=1'));
-  post(e, text('予約について質問'));
-  const id = e.rows(SHEET)[0]['受付ID'];
+  addRow(e, 'INQ-20261001-0001', '2026-10-01 10:00:00', true);
+  const id = 'INQ-20261001-0001';
   assert.equal(opState(e), null);
   setCell(e, id, '自動返信有効', false);
   const n0 = replies(e).length;
@@ -266,22 +305,43 @@ test('他の利用者はオペレーター対応中の影響を受けない', ()
   assert.equal(replies(e).length, n0 + 1);
 });
 
-test('入力待ち中に「オペレーターに相談」を選ぶと入力待ちを破棄し、モード中の文は問い合わせとして保存しない', () => {
+test('入力待ち中に「オペレーターに相談」を選ぶと前の入力待ちを破棄し、受付後の文は問い合わせとして保存しない', () => {
   const e = env();
-  post(e, postback('a=inq_cat&c=2'));
-  assert.ok(e.cache.get('inq:' + USER));
+  post(e, postback('a=inq_cat&c=4'));
+  assert.equal(JSON.parse(e.cache.get('inq:' + USER)).c, '4');
+  post(e, postback('a=rsv_start'));
+  assert.equal(e.cache.get('inq:' + USER) || null, null, '予約確認を始めると問い合わせの入力待ちを中断');
   startOperator(e);
   assert.equal(e.cache.get('inq:' + USER) || null, null);
+  assert.equal(e.cache.get('rsv:' + USER) || null, null);
   post(e, text('予約番号 R-1 の日程を変えたい'));
   assert.equal(e.rows(SHEET).length, 1);
 });
 
-test('通知テンプレート OPERATOR_START が ON なら、その文面＋受付IDで返信', () => {
+test('通知テンプレート OPERATOR_START が ON なら、相談内容の案内にその文面を使う（受付IDは受付完了で案内）', () => {
   const e = env();
-  e.sheets['通知テンプレート'].data.push(['OPERATOR_START', 'オペレーター対応開始', '', 'スタッフにおつなぎします。', 'ON', '']);
+  e.sheets['通知テンプレート'].data.push(['OPERATOR_START', 'オペレーター対応開始', '', 'スタッフにおつなぎします。\n受付ID：{{受付ID}}', 'ON', '']);
   post(e, postback('a=inq_operator'));
-  const t = replyText(replies(e)[0]);
-  assert.match(t, /^スタッフにおつなぎします。\n\n🔖 受付ID：INQ-\d{8}-0001$/);
+  assert.equal(replyText(replies(e)[0]), 'スタッフにおつなぎします。');
+  post(e, text('相談です'));
+  assert.match(replyText(replies(e)[1]), /🔖 受付ID：INQ-\d{8}-0001/);
+});
+
+test('同じ Webhook イベントが再送されても受付IDを重複発行しない（シートの LINEイベントID で照合）', () => {
+  const e = env();
+  post(e, postback('a=inq_cat&c=5'));
+  const evt = text('質問です');
+  post(e, evt);
+  // キャッシュの重複排除（6時間）が切れた後の再送を想定
+  e.cache.delete('evt:' + evt.webhookEventId);
+  e.ctx.setInquiryState_(USER, { c: '5' });
+  e.ctx.releaseOperatorMode_(USER, 'test');
+  const d = e.sheets[SHEET].data; d[1][d[0].indexOf('自動返信有効')] = true;
+  const again = Object.assign({}, evt, { replyToken: tok() });
+  post(e, again);
+  assert.equal(e.rows(SHEET).length, 1, '行は1件のまま');
+  assert.equal(pushes(e).length, 1, '運営通知も1回だけ');
+  assert.match(replyText(replies(e).pop()), new RegExp('受付ID：' + e.rows(SHEET)[0]['受付ID']));
 });
 
 /* ---------- 偽装イベント（GAS単体＝署名未検証） ---------- */
@@ -354,8 +414,9 @@ test('運営に通知できない（通知先未設定）場合はエラーロ�
 test('応答後にシート保存が失敗してもモードは開始し、運営通知に【要対応】を含め、エラーログに記録', () => {
   const e = env();
   const orig = e.ctx.appendRow_;
-  e.ctx.appendRow_ = (name, obj) => { if (name === SHEET) throw new Error('quota'); return orig(name, obj); };
   post(e, postback('a=inq_operator'));
+  e.ctx.appendRow_ = (name, obj) => { if (name === SHEET) throw new Error('quota'); return orig(name, obj); };
+  post(e, text('相談です'));
   e.ctx.appendRow_ = orig;
   assert.ok(opState(e));
   assert.match(pushes(e)[0].json.messages[0].text, /【要対応】問い合わせ管理への保存に失敗/);
@@ -370,8 +431,9 @@ test('応答後にシート保存が失敗してもモードは開始し、運�
 
 test('リレー経由（署名検証済み）でも同じく開始・停止・再開する。応答失敗時はプッシュで受付IDを通知', () => {
   const e = env({ relay: true, props: { WEBHOOK_MODE: 'relay' } });
-  e.state.replyFail = true;
   relay(e, postback('a=inq_operator'));
+  e.state.replyFail = true;
+  relay(e, text('相談です'));
   e.state.replyFail = false;
   const st = opState(e);
   assert.ok(st);
@@ -480,13 +542,13 @@ test('シート列・設定行の補完：「自動返信有効」列を末尾�
   assert.match(r.message, /問い合わせ管理：自動返信有効/);
   assert.match(r.message, /自動返信有効：TRUE／FALSE）：設定しました/);
   const h = [...e.sheets[SHEET].data[0]];
-  assert.deepEqual(h, ['受付ID', 'LINEユーザーID', '受付日時', '種別', '内容', '対応状況', '担当者', '回答日時', '備考', '自動返信有効']);
+  assert.deepEqual(h, ['受付ID', 'LINEユーザーID', '受付日時', '種別', '内容', '対応状況', '担当者', '回答日時', '備考', '自動返信有効', 'LINEイベントID']);
   assert.deepEqual([...e.sheets[SHEET].data[1]].slice(0, 9), before, '既存の行は変更しない');
   const row = e.rows(SHEET)[0];
   assert.equal(row['自動返信有効'], '', '既存行は空欄のまま（= 判定に使わない）');
   assert.equal(row['対応状況'], '完了');
   const v6 = e.sheets[SHEET].fmt.validations.find((x) => x.col === 6);
-  assert.deepEqual([...v6.v.list], ['未対応', '対応中', '対応完了']);
+  assert.deepEqual([...v6.v.list], ['未対応', '対応中', 'お客様回答待ち', '見積・社内確認中', '完了', 'キャンセル・取下げ']);
   const v10 = e.sheets[SHEET].fmt.validations.find((x) => x.col === 10);
   assert.deepEqual([...v10.v.list], ['TRUE', 'FALSE']);
   // 既存の履歴しかない顧客は自動返信のまま

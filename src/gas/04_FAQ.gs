@@ -137,6 +137,7 @@ function faqAnswerMessage_(faq) {
  * @return {Object[]} メッセージ配列（最大5件）
  */
 function buildAutoReply_(text, userId) {
+  __pendingUserId = userId || null;
   var norm = normalizeText_(text);
   var faqs = loadFaqs_();
 
@@ -160,7 +161,8 @@ function buildIntentReply_(intent, faqs) {
     case 'BOOKING':
       return buildLinkMessage_(INTENT_TEXT.BOOKING, 'フライト予約', getUrlSetting_(SETTING_KEYS.BOOKING_URL), INTENT_TEXT.BOOKING_PENDING);
     case 'BOOKING_CHECK':
-      return buildLinkMessage_(INTENT_TEXT.BOOKING_CHECK, '予約確認', getBookingCheckUrl_(), INTENT_TEXT.BOOKING_CHECK_PENDING);
+      // LINE トークでの予約確認を始める（入力待ちは応答が受理されてから設定。06_Reservation.gs）
+      return [buildReservationCheckStart_()];
     case 'PLAN':
       return buildLinkMessage_(INTENT_TEXT.PLAN, 'プラン一覧', getUrlSetting_(SETTING_KEYS.PLANS_URL), INTENT_TEXT.PLAN_PENDING);
     case 'PRICE': {
@@ -182,7 +184,8 @@ function buildIntentReply_(intent, faqs) {
     case 'INQUIRY':
       return [buildInquiryCategoryMessage_()];
     case 'FAQ':
-      return [buildFaqMenu_(faqs)];
+      // 公式サイトの FAQ ページがあればそちらへ。未公開の間は LINE 内の FAQ（「FAQ」シート）を表示
+      return getUrlSetting_(SETTING_KEYS.FAQ_URL) ? buildFaqPageMessage_() : [buildFaqMenu_(faqs)];
   }
   return buildUnmatchedReply_('', null);
 }
@@ -194,8 +197,6 @@ function buildIntentReply_(intent, faqs) {
 var INTENT_TEXT = {
   BOOKING: '🚁 フライトのご予約は、下記の予約ページより承っております。\nプランと日程をお選びいただき、お支払いまでお手続きいただけます。',
   BOOKING_PENDING: '🚁 オンラインでのご予約受付は、現在準備中でございます。\nご予約のご相談は、メニューの「お問い合わせ」より承ります。',
-  BOOKING_CHECK: '🔖 ご予約内容は、下記の予約確認ページにてご確認いただけます。\nLINEでご本人様を確認のうえ、お客様のご予約のみを表示いたします。',
-  BOOKING_CHECK_PENDING: '🔖 予約確認ページは、現在準備中でございます。\nご予約内容の確認・変更は、メニューの「お問い合わせ」より承ります。',
   PLAN: '✨ 遊覧飛行のプランは、下記よりご覧いただけます。',
   PLAN_PENDING: '✨ プラン一覧は、現在準備中でございます。\n公開まで今しばらくお待ちくださいませ。',
   PRICE: '🚁 料金はプラン・人数・日程により異なります。\n各プランの料金は、下記のプラン一覧にてご確認くださいませ。',
@@ -212,6 +213,26 @@ var INTENT_TEXT = {
   FAQ_EMPTY: '📋 よくあるご質問は、現在準備中でございます。\nご不明な点は、お気軽にご相談くださいませ。',
   UNMATCHED: '📩 メッセージをありがとうございます。\n自動ではお答えできない内容のため、ご希望の対応を下記よりお選びくださいませ。'
 };
+
+/** 「予約確認」と送信されたとき：予約IDの入力を案内し、返信が受理されたら入力待ちにする */
+var __pendingUserId = null;
+function buildReservationCheckStart_() {
+  var uid = __pendingUserId;
+  if (!uid) return withQuickReply_(MSG_ONE_TO_ONE_ONLY, []); // グループ・トークルームでは予約確認を始めない
+  __pendingAfterReply = function () { setReservationState_(uid, { step: 'id', n: 0 }); };
+  return withQuickReply_(RSV_TEXT.ASK_ID, [postbackAction_('入力をやめる', 'a=rsv_cancel', '入力をやめる')]);
+}
+
+/** 公式サイトの FAQ ページへの案内（URL 未設定なら準備中の案内） */
+function buildFaqPageMessage_() {
+  var url = getUrlSetting_(SETTING_KEYS.FAQ_URL);
+  var quick = [postbackAction_('お問い合わせ', 'a=inq_start', 'お問い合わせ')];
+  if (!url) return [withQuickReply_(RICHMENU_PENDING_TEXT.FAQ, quick)];
+  var msgs = buildLinkMessage_('📋 よくあるご質問は、公式サイトにまとめております。\n天候・運航、料金・お支払い、予約変更・キャンセル、搭乗条件・持ち物などをご覧いただけます。',
+    'よくある質問', url);
+  withQuickReply_(msgs[msgs.length - 1], quick);
+  return msgs;
+}
 
 /** トピック応答：FAQ にあればそれを、なければ既定文＋問い合わせ導線 */
 function topicReply_(faqs, words, fallback) {

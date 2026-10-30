@@ -74,41 +74,45 @@ test('お問い合わせ：本文は2行の案内のみ（番号付き一覧・�
   }
 });
 
-test('お問い合わせ：選択ボタンのラベル・postback・表示テキストは従来どおり（6件）', () => {
+test('お問い合わせ：選択ボタンは4件（チャーター見積・フライト予約について・その他・オペレーターに相談）。postback は従来の番号を維持', () => {
   const e = env();
   const a = actions(send(e, textEv('お問い合わせ'))[0]);
   assert.deepEqual(a.map((x) => [x.type, x.label, x.data, x.displayText]), [
-    ['postback', 'フライト予約について', 'a=inq_cat&c=1', 'フライト予約について'],
-    ['postback', '予約内容の確認・変更', 'a=inq_cat&c=2', '予約内容の確認・変更'],
-    ['postback', '天候・運航について', 'a=inq_cat&c=3', '天候・運航について'],
     ['postback', 'チャーター見積', 'a=inq_cat&c=4', 'チャーター見積'],
+    ['postback', 'フライト予約について', 'a=inq_cat&c=1', 'フライト予約について'],
     ['postback', 'その他のお問い合わせ', 'a=inq_cat&c=5', 'その他のお問い合わせ'],
     ['postback', 'オペレーターに相談', 'a=inq_operator', 'オペレーターに相談']
   ]);
 });
 
-test('お問い合わせ：すべてのボタンが動作する（種別→入力案内→受付、オペレーター→停止）', () => {
+test('お問い合わせ：すべてのボタンが動作する（入力案内 → 受付完了 → 有人対応）。旧ボタン c=2・c=3 も安全に振り替える', () => {
   const guides = {
-    1: '📩【フライト予約について】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。',
-    2: '📩【予約内容の確認・変更】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。\n🔖 予約番号をお持ちの場合は、併せてご記入ください。',
-    3: '📩【天候・運航について】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。',
-    4: '📩【チャーター見積】\nご希望日・人数・出発地／目的地・ご予算などを、1通のメッセージでお送りくださいませ。',
-    5: '📩【その他のお問い合わせ】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。'
+    4: '📩【チャーター見積】\n下記をご記入のうえ、1通のメッセージでお送りくださいませ。未定の項目は「未定」で構いません。\n\n・希望日時\n・出発地\n・目的地\n・搭乗人数\n・利用目的\n・その他のご要望',
+    5: '📩【その他のお問い合わせ】\nお問い合わせ内容を、1通のメッセージでお送りくださいませ。',
+    op: '💬 担当スタッフへおつなぎいたします。\nご相談内容を、このトークに1通のメッセージでお送りくださいませ。'
   };
-  for (const c of [1, 2, 3, 4, 5]) {
+  const acks = {
+    4: /^✅ チャーターのお見積りのご依頼を承りました。\n🔖 受付ID：INQ-\d{8}-0001\n\n担当者が運航条件と料金を確認のうえ、このトークでご案内いたします。ご案内まで、自動返信を一時停止いたします。$/,
+    5: /^✅ お問い合わせを承りました。\n🔖 受付ID：INQ-\d{8}-0001\n\n担当者が内容を確認のうえ、このトークで順次ご返信いたします。それまで、自動返信を一時停止いたします。$/,
+    op: /^💬 ご相談内容を承りました。\n🔖 受付ID：INQ-\d{8}-0001\n\n担当スタッフがこのトークで順次ご返信いたします。対応中は、自動返信を一時停止いたします。$/
+  };
+  for (const c of ['4', '5', 'op']) {
     const e = env();
-    const g = send(e, pbEv('a=inq_cat&c=' + c))[0];
+    const g = send(e, pbEv(c === 'op' ? 'a=inq_operator' : 'a=inq_cat&c=' + c))[0];
     assert.equal(g.text, guides[c]);
     assert.deepEqual(actions(g).map((x) => [x.label, x.data]), [['入力をやめる', 'a=inq_cancel']]);
     const ack = send(e, textEv('テストのお問い合わせ'))[0].text;
-    assert.match(ack, /^✅ お問い合わせを承りました。\n🔖 受付ID：INQ-\d{8}-0001\n\n内容を確認のうえ、担当者より順次ご連絡いたします。追加のご連絡は、受付IDを添えてお送りくださいませ。$/);
+    assert.match(ack, acks[c]);
     assert.equal(e.rows('問い合わせ管理').length, 1);
+    assert.equal(e.rows('問い合わせ管理')[0]['自動返信有効'], false);
   }
   const e = env();
-  send(e, pbEv('a=inq_cat&c=1'));
+  assert.match(send(e, pbEv('a=inq_cat&c=1'))[0].text, /オンラインでのご予約受付は、現在準備中でございます/);
+  send(e, pbEv('a=inq_cat&c=5'));
   assert.equal(send(e, pbEv('a=inq_cancel'))[0].text, '✅ お問い合わせの入力を取り消しました。\nまたいつでもお気軽にご相談くださいませ。');
-  const op = send(e, pbEv('a=inq_operator'))[0].text;
-  assert.match(op, /^💬 担当スタッフへおつなぎいたします。\nご相談内容をこのトークにお送りくださいませ。確認のうえ、担当者より順次ご返信いたします。\n\n※担当者の対応中は、自動返信を一時停止いたします。\n🔖 受付ID：INQ-\d{8}-0001$/);
+  assert.match(send(e, pbEv('a=inq_cat&c=2'))[0].text, /予約IDを入力してくださいませ/, '旧：予約内容の確認・変更 → 予約確認');
+  assert.match(send(e, pbEv('a=inq_cat&c=3'))[0].text, /よくある質問のページは、現在準備中/, '旧：天候・運航 → FAQ');
+  assert.equal(e.rows('問い合わせ管理').length, 0);
 });
 
 /* ---------- 自動返信の TRUE / FALSE ---------- */
@@ -116,6 +120,7 @@ test('お問い合わせ：すべてのボタンが動作する（種別→入�
 test('自動返信有効=FALSE の間は返信せず、TRUE に戻すと次のメッセージから返信する（文言変更後も維持）', () => {
   const e = env();
   send(e, pbEv('a=inq_operator'));
+  send(e, textEv('相談です'));
   assert.equal(send(e, textEv('予約')), null);
   assert.equal(send(e, pbEv('a=menu_unset&item=BOOKING')), null);
   const d = e.sheets['問い合わせ管理'].data;
@@ -147,16 +152,16 @@ test('一致しない質問：本文でボタン名を繰り返さず、担当�
   assert.deepEqual(actions(m).map((x) => x.label), ['担当者に送る', 'よくある質問', 'お問い合わせ', '予約']);
   const ack = send(e, pbEv('a=inq_handoff'))[0].text;
   assert.match(ack, /^✅ お問い合わせを承りました。/);
+  assert.equal(e.rows('問い合わせ管理')[0]['自動返信有効'], false);
 });
 
 /* ---------- 準備中（未実装機能） ---------- */
 
-test('URL 未設定：予約・予約確認・プラン・料金・チャーターは「準備中」と案内し、ページへ誘導しない', () => {
+test('URL 未設定：予約・プラン・料金・チャーター・FAQ ページは「準備中」と案内し、ページへ誘導しない', () => {
   const e = env({ seedFaq: true });
   e.sheets['FAQ'].data.splice(1); // 料金の FAQ がない状態
   const cases = {
     '予約': '🚁 オンラインでのご予約受付は、現在準備中でございます。\nご予約のご相談は、メニューの「お問い合わせ」より承ります。',
-    '予約確認': '🔖 予約確認ページは、現在準備中でございます。\nご予約内容の確認・変更は、メニューの「お問い合わせ」より承ります。',
     'プラン': '✨ プラン一覧は、現在準備中でございます。\n公開まで今しばらくお待ちくださいませ。',
     '料金': '🚁 料金はプラン・人数・日程により異なります。\nプラン一覧は現在準備中のため、料金のご相談はメニューの「お問い合わせ」より承ります。'
   };
@@ -173,7 +178,9 @@ test('URL 未設定：予約・予約確認・プラン・料金・チャータ�
   assert.deepEqual(actions(ch[1]).map((x) => [x.label, x.data]), [['見積を依頼', 'a=inq_cat&c=4']]);
   assert.match(send(e, textEv('キャンセル'))[0].text, /担当者がご案内いたします/);
   assert.match(send(e, textEv('集合場所'))[0].text, /担当者がご案内いたします/);
-  for (const k of ['BOOKING', 'BOOKING_CHECK', 'PLANS', 'CHARTER']) {
+  assert.match(send(e, textEv('予約確認'))[0].text, /^🔖 ご予約の確認ですね。/, '予約確認は LINE トークで開始');
+  send(e, pbEv('a=rsv_cancel'));
+  for (const k of ['BOOKING', 'FAQ', 'PLANS', 'CHARTER']) {
     const m = send(e, pbEv('a=menu_unset&item=' + k))[0];
     assert.match(m.text, /現在準備中でございます/);
     assert.doesNotMatch(m.text, /「お問い合わせ」|「よくある質問」|「チャーター見積」/, 'ボタン名を本文で繰り返さない');
@@ -182,11 +189,11 @@ test('URL 未設定：予約・予約確認・プラン・料金・チャータ�
 });
 
 test('URL 設定済み：ボタン付きで案内し、ボタン本文は160字以内', () => {
-  const e = env({ seedFaq: true, urls: { BOOKING_SITE_URL: 'https://example.com/book', BOOKING_CONFIRM_URL: 'https://example.com/my',
-    PLAN_LIST_URL: 'https://example.com/plans', CHARTER_URL: 'https://example.com/charter' } });
+  const e = env({ seedFaq: true, urls: { BOOKING_SITE_URL: 'https://example.com/book', FAQ_PAGE_URL: 'https://example.com/faq',
+    PLAN_LIST_URL: 'https://example.com/plans', CHARTER_URL: 'https://example.com/charter', BOOKING_CONFIRM_URL: 'https://example.com/my' } });
   e.sheets['FAQ'].data.splice(1);
-  for (const [k, url] of [['予約', 'https://example.com/book'], ['予約確認', 'https://example.com/my'], ['プラン', 'https://example.com/plans'],
-    ['料金', 'https://example.com/plans'], ['チャーター', 'https://example.com/charter']]) {
+  for (const [k, url] of [['予約', 'https://example.com/book'], ['プラン', 'https://example.com/plans'],
+    ['料金', 'https://example.com/plans'], ['チャーター', 'https://example.com/charter'], ['FAQ', 'https://example.com/faq']]) {
     const b = send(e, textEv(k)).find((m) => m.type === 'template');
     assert.ok(b, k);
     assert.ok(b.template.text.length <= 160, k);
@@ -194,7 +201,9 @@ test('URL 設定済み：ボタン付きで案内し、ボタン本文は160字�
   }
   assert.match(send(e, textEv('キャンセル'))[0].text, /予約確認ページにてご確認/);
   const m = send(e, pbEv('a=menu_unset&item=BOOKING'));
-  assert.equal(m[0].template.text, '✨ 「フライト予約」は、下記よりご利用いただけます。');
+  assert.equal(m[0].template.text, '✨ 「ご予約はこちら」は、下記よりご利用いただけます。');
+  const fl = send(e, pbEv('a=inq_cat&c=1'));
+  assert.equal(fl[fl.length - 1].template.actions[0].uri, 'https://example.com/book');
 });
 
 /* ---------- 通知テンプレート ---------- */
@@ -241,17 +250,12 @@ test('既定テンプレート（不足時に OFF で追加する文面）は管
   }
 });
 
-test('OPERATOR_START を ON にすると管理台帳の文面で返信し、受付IDを末尾に付ける（{{受付ID}} があれば差し込み）', () => {
+test('OPERATOR_START を ON にすると管理台帳の文面で相談内容を案内し、受付IDは受付完了で案内', () => {
   const e = env();
   const row = e.sheets['通知テンプレート'].data.find((r) => r[0] === 'OPERATOR_START');
   row[4] = 'ON';
-  const t = send(e, pbEv('a=inq_operator'))[0].text;
-  assert.equal(t.indexOf(SHEET_TEMPLATES[8][3]), 0);
-  assert.match(t, /\n\n🔖 受付ID：INQ-\d{8}-0001$/);
-  const e2 = env();
-  const r2 = e2.sheets['通知テンプレート'].data.find((r) => r[0] === 'OPERATOR_START');
-  r2[3] = '💬 おつなぎいたします。受付ID：{{受付ID}}'; r2[4] = 'ON';
-  assert.match(send(e2, pbEv('a=inq_operator'))[0].text, /^💬 おつなぎいたします。受付ID：INQ-\d{8}-0001$/);
+  assert.equal(send(e, pbEv('a=inq_operator'))[0].text, SHEET_TEMPLATES[8][3]);
+  assert.match(send(e, textEv('相談です'))[0].text, /🔖 受付ID：INQ-\d{8}-0001/);
 });
 
 test('友だち追加：WELCOME（ON）の本文をそのまま送る。OFF なら GAS の予備の文面', () => {
@@ -281,7 +285,15 @@ function fixedTexts(e) {
   const pending = get('RICHMENU_PENDING_TEXT');
   Object.keys(pending).forEach((k) => { out['RICHMENU_PENDING_TEXT.' + k] = pending[k]; });
   out.DEFAULT_WELCOME_MESSAGE = get('DEFAULT_WELCOME_MESSAGE');
-  out.DEFAULT_OPERATOR_START_TEXT = get('DEFAULT_OPERATOR_START_TEXT');
+  out.DEFAULT_OPERATOR_PROMPT_TEXT = get('DEFAULT_OPERATOR_PROMPT_TEXT');
+  const rsv = get('RSV_TEXT');
+  Object.keys(rsv).forEach((k) => { out['RSV_TEXT.' + k] = rsv[k]; });
+  const guides = get('INQUIRY_GUIDE_TEXT');
+  Object.keys(guides).forEach((k) => { out['INQUIRY_GUIDE_TEXT.' + k] = guides[k]; });
+  out.FLIGHT_GUIDE_TEXT = get('FLIGHT_GUIDE_TEXT');
+  out.FLIGHT_GUIDE_PENDING_TEXT = get('FLIGHT_GUIDE_PENDING_TEXT');
+  out.inquiryReceivedCharter = get("inquiryReceivedText_('INQ-20261028-0001', 'charter')");
+  out.inquiryReceivedOperator = get("inquiryReceivedText_('INQ-20261028-0001', 'operator')");
   out.MSG_INQUIRY_MENU = get('MSG_INQUIRY_MENU');
   out.MSG_NON_TEXT = get('MSG_NON_TEXT');
   out.MSG_INQUIRY_CANCELLED = get('MSG_INQUIRY_CANCELLED');

@@ -178,7 +178,7 @@ test('リッチメニュー作成途中の削除失敗（従来は握りつぶ�
     if (/\/v2\/bot\/user\/all\/richmenu$/.test(url)) return { code: 404, body: {} };
     if (/\/content$/.test(url)) return { code: 500, body: {} }; // 画像アップロード失敗
     return { code: 200, body: {} };
-  }, env: { driveFiles: { ['a'.repeat(30)]: { name: 'menu.jpg', contentType: 'image/jpeg', bytes: fakeImage('jpeg', 2500, 1686) } } } });
+  }, env: { driveFiles: { ['a'.repeat(30)]: { name: 'menu.jpg', contentType: 'image/jpeg', bytes: fakeImage('jpeg', 1543, 1019) } } } });
   e.setSetting('RICHMENU_IMAGE_FILE_ID', 'a'.repeat(30));
   const res = e.ctx.adminRun('richMenuDeploy'); // 画像アップロード失敗 → 作成したメニューを削除 → 削除も失敗
   assert.equal(res.ok, false);

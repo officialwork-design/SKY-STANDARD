@@ -158,7 +158,10 @@ test('シート補完: SPREADSHEET_ID を起動用プロパティに保存し、
   assert.match(r.message, /SPREADSHEET_ID（起動用）をスクリプトプロパティに保存しました/);
   assert.equal(e.props.SPREADSHEET_ID, '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es');
   assert.equal(JSON.stringify(e.sheets['FAQ'].data), faq);
-  assert.equal(JSON.stringify(e.sheets['ID管理'].data), id);
+  const idAfter = e.sheets['ID管理'].data;
+  assert.equal(JSON.stringify(idAfter.slice(0, JSON.parse(id).length)), id, '既存の行は変更しない');
+  assert.deepEqual(idAfter.slice(JSON.parse(id).length).map((x) => x[0]), ['FAQ_PAGE_URL'], '新しいキー（FAQ_PAGE_URL）だけ空欄で追加');
+  assert.equal(idAfter[idAfter.length - 1][1], '', 'URL は入力しない（ダミー URL を設定しない）');
 });
 
 test('シート補完: ID管理に不足キーがあれば行を追加（既存行は変更しない）', () => {
@@ -170,7 +173,7 @@ test('シート補完: ID管理に不足キーがあれば行を追加（既存�
   const after = e.sheets['ID管理'].data;
   before.forEach((r, i) => assert.deepEqual(after[i], r));
   const added = after.slice(before.length).map((r) => r[0]);
-  assert.deepEqual(added.sort(), ['CHARTER_URL', 'RESERVATION_API_KEY']);
+  assert.deepEqual(added.sort(), ['CHARTER_URL', 'FAQ_PAGE_URL', 'RESERVATION_API_KEY']);
   assert.equal(after.find((r) => r[0] === 'RESERVATION_API_KEY')[2], '秘密情報');
 });
 
@@ -220,8 +223,10 @@ test('リッチメニュー設定確認・登録（画像ID 未設定なら安�
   const e = env();
   e.setSetting('BOOKING_SITE_URL', 'https://booking.example.jp/');
   const c = e.ctx.adminRun('richMenuCheck');
-  assert.match(c.message, /【OK】フライト予約 → リンク https:\/\/booking\.example\.jp\//);
-  assert.match(c.message, /【準備中】プラン一覧 → 「現在準備中です」を返信/);
+  assert.match(c.message, /【OK】ご予約はこちら → リンク https:\/\/booking\.example\.jp\//);
+  assert.match(c.message, /【OK】予約確認 → LINE トークで予約IDの入力を開始/);
+  assert.match(c.message, /【OK】お問い合わせ → LINE トークでお問い合わせメニューを表示/);
+  assert.match(c.message, /【準備中】よくある質問 → 「現在準備中です」を返信/);
   assert.match(c.message, /【未設定】RICHMENU_IMAGE_FILE_ID/);
   assert.match(c.message, /【未登録】既定のリッチメニューはまだ登録されていません/);
   const d = e.ctx.adminRun('richMenuDeploy');

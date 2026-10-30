@@ -9,7 +9,7 @@ const path = require('path');
 const vm = require('vm');
 const crypto = require('crypto');
 
-const TEXT_COLS = ['予約ID', 'LINEユーザーID', 'プランID', '時間帯', '搭乗日', '受付ID', '送信ID', '冪等キー', 'イベントID', '電話番号', 'FAQ ID', 'テンプレートID', '最終イベント日時'];
+const TEXT_COLS = ['予約ID', 'LINEユーザーID', 'プランID', '時間帯', '搭乗日', '受付ID', '送信ID', '冪等キー', 'イベントID', 'LINEイベントID', '電話番号', 'FAQ ID', 'テンプレートID', '最終イベント日時'];
 const GAS_DIR = path.join(__dirname, '..', '..', 'src', 'gas');
 
 /** 実スプレッドシート（2026-10-21 時点）のヘッダーと既存データ */
@@ -243,13 +243,21 @@ function createGasEnv(opts = {}) {
         return {
           getName: () => f.name,
           getBlob: () => {
-            const blob = {
-              contentType: f.contentType,
-              getBytes: () => Array.from(f.bytes).map((b) => (b > 127 ? b - 256 : b)),
-              getContentType: () => blob.contentType,
-              setContentType(t) { blob.contentType = t; return blob; }
+            const mkBlob = (bytes, ct) => {
+              const blob = {
+                contentType: ct,
+                getBytes: () => Array.from(bytes).map((b) => (b > 127 ? b - 256 : b)),
+                getContentType: () => blob.contentType,
+                setContentType(t) { blob.contentType = t; return blob; },
+                // Blob.getAs（画像形式の変換）。f.asJpeg に変換後のバイト列を用意したときだけ成功する
+                getAs(t) {
+                  if (t !== 'image/jpeg' || !f.asJpeg) throw new Error('conversion not supported in mock');
+                  return mkBlob(f.asJpeg, 'image/jpeg');
+                }
+              };
+              return blob;
             };
-            return blob;
+            return mkBlob(f.bytes, f.contentType);
           }
         };
       }

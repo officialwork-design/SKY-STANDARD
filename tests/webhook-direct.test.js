@@ -136,8 +136,9 @@ test('偽造テキストで他人の「担当者に送る」内容を差し替�
 test('FAQ 自動応答は Webhook だけで完結（個人情報・予約情報は含めない）', () => {
   const e = env();
   e.sheets['予約管理'].data.push(['R-1', USER, '', '秘密のプラン', '2026-12-01', '10:00', 2, 99999, '予約確定', '決済完了', '', '']);
-  post(e, text('予約確認'));
   post(e, text('キャンセル料'));
+  post(e, text('予約確認'));
+  post(e, text('R-1')); // 予約IDだけ（形式も違う）では予約内容を表示しない
   const all = JSON.stringify(e.linePosts('/reply').map((p) => p.json));
   assert.match(all, /キャンセル条件/);
   assert.doesNotMatch(all, /秘密のプラン|99999|R-1/);

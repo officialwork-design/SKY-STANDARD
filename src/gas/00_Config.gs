@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-10-28.1-messages',
+  BUILD: '2026-10-30.1-flow-v2',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',
@@ -31,7 +31,11 @@ var APP = {
   /** 通知送信の最大再試行回数 */
   MAX_SEND_RETRY: 3,
   /** 本人確認（予約紐付け）試行回数の上限（1時間あたり） */
-  LINK_ATTEMPT_LIMIT_PER_HOUR: 5
+  LINK_ATTEMPT_LIMIT_PER_HOUR: 5,
+  /** LINE トークでの予約確認（予約ID・本人確認の入力待ち）の保持期間（秒） */
+  RESERVATION_STATE_TTL_SEC: 10 * 60,
+  /** 予約IDの入力ミスを受け付ける回数（超えたら入力待ちを終了） */
+  RESERVATION_ID_MAX_TRIES: 3
 };
 
 /** スプレッドシートのシート名（既存10シート＋ID管理） */
@@ -61,7 +65,9 @@ REQUIRED_COLUMNS[SHEETS.CUSTOMERS] = ['LINEユーザーID', '表示名', '氏名
 REQUIRED_COLUMNS[SHEETS.RESERVATIONS] = ['予約ID', 'LINEユーザーID', 'プランID', 'プラン名', '搭乗日', '時間帯', '人数',
   '金額', '予約状態', '決済状態', '予約サイト管理URL', '最終更新', '集合場所', '注意事項', '最終イベント日時'];
 REQUIRED_COLUMNS[SHEETS.INQUIRIES] = ['受付ID', 'LINEユーザーID', '受付日時', '種別', '内容', '対応状況', '担当者',
-  '回答日時', '備考', '自動返信有効']; // 自動返信有効は末尾に追加（既存列の位置は変えない。12_Operator.gs）
+  '回答日時', '備考', '自動返信有効', 'LINEイベントID'];
+// 自動返信有効・LINEイベントID は末尾に追加（既存列の位置は変えない）。
+// LINEイベントID は同じ Webhook イベントで受付IDを二重発行しないための照合用（12_Operator.gs）
 REQUIRED_COLUMNS[SHEETS.ID_MANAGEMENT] = ['設定キー', '設定値', '分類', '保存先・取扱い', '説明'];
 REQUIRED_COLUMNS[SHEETS.TEMPLATES] = ['テンプレートID', '用途', '送信タイミング', '本文', '有効', '備考'];
 REQUIRED_COLUMNS[SHEETS.FAQ] = ['FAQ ID', 'カテゴリ', '質問・キーワード', '回答', '有効', '要有人確認'];
@@ -85,7 +91,8 @@ var ID_KEYS = {
   BOOKING_SITE_URL: { key: 'BOOKING_SITE_URL', label: 'フライト予約ページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー', '自動応答'] },
   BOOKING_CONFIRM_URL: { key: 'BOOKING_CONFIRM_URL', label: '予約確認ページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー（LIFF ID 未設定時）'] },
   PLAN_LIST_URL: { key: 'PLAN_LIST_URL', label: 'プラン一覧ページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー', '自動応答'] },
-  CHARTER_URL: { key: 'CHARTER_URL', label: 'チャーターページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー', '自動応答'] },
+  CHARTER_URL: { key: 'CHARTER_URL', label: 'チャーターページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['自動応答'] },
+  FAQ_PAGE_URL: { key: 'FAQ_PAGE_URL', label: 'よくある質問ページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー', '自動応答'] },
   ADMIN_NOTIFY_TARGET: { key: 'ADMIN_NOTIFY_TARGET', label: '管理者LINE通知先ID', pattern: /^([UCR][0-9a-f]{32})([,、\s]+[UCR][0-9a-f]{32})*$/, usedBy: ['運営通知'] },
   RICHMENU_IMAGE_FILE_ID: { key: 'RICHMENU_IMAGE_FILE_ID', label: 'リッチメニュー画像ファイルID', pattern: /^[A-Za-z0-9_-]{20,}$/, usedBy: ['リッチメニュー登録'], propFallback: true },
   RESERVATION_API_BASE_URL: { key: 'RESERVATION_API_BASE_URL', label: '予約システムAPIのURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['予約確認（API連携・任意）'], propFallback: true }
@@ -100,6 +107,7 @@ var SETTING_KEYS = {
   BOOKING_CHECK_URL: ID_KEYS.BOOKING_CONFIRM_URL,
   PLANS_URL: ID_KEYS.PLAN_LIST_URL,
   CHARTER_URL: ID_KEYS.CHARTER_URL,
+  FAQ_URL: ID_KEYS.FAQ_PAGE_URL,
   LIFF_ID: ID_KEYS.LIFF_ID,
   ADMIN_TARGET: ID_KEYS.ADMIN_NOTIFY_TARGET
 };
@@ -278,11 +286,13 @@ function checkConfig_() {
   need('予約確認(LIFF)', !!getSetting_(ID_KEYS.LIFF_ID), idLabel(ID_KEYS.LIFF_ID));
   need('予約確認(LIFF)', !!getSetting_(ID_KEYS.GAS_WEBAPP_URL), idLabel(ID_KEYS.GAS_WEBAPP_URL));
   need('予約通知', !!getProp_(PROP_KEYS.RESERVATION_WEBHOOK_SECRET), 'RESERVATION_WEBHOOK_SECRET（スクリプトプロパティ）');
+  // リッチメニュー（4領域）：URL 未設定の「ご予約はこちら」「よくある質問」は準備中表示になる
   need('リッチメニュー', !!getUrlSetting_(ID_KEYS.BOOKING_SITE_URL), idLabel(ID_KEYS.BOOKING_SITE_URL));
-  need('リッチメニュー', !!getUrlSetting_(ID_KEYS.PLAN_LIST_URL), idLabel(ID_KEYS.PLAN_LIST_URL));
-  need('リッチメニュー', !!getUrlSetting_(ID_KEYS.CHARTER_URL), idLabel(ID_KEYS.CHARTER_URL));
-  need('リッチメニュー', !!getBookingCheckUrl_(), 'LIFF_ID または BOOKING_CONFIRM_URL（ID管理シート）');
+  need('リッチメニュー', !!getUrlSetting_(ID_KEYS.FAQ_PAGE_URL), idLabel(ID_KEYS.FAQ_PAGE_URL));
   need('リッチメニュー', !!getSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID), idLabel(ID_KEYS.RICHMENU_IMAGE_FILE_ID));
+  // LINE トークでの予約確認：予約サイト API がなければ本人確認（電話番号・メール照合）ができない
+  need('予約確認（LINEトーク）', !!getSetting_(ID_KEYS.RESERVATION_API_BASE_URL), idLabel(ID_KEYS.RESERVATION_API_BASE_URL) +
+    ' … 未設定の間は「予約管理」シートで LINE ユーザーIDが紐づいた予約だけを表示');
   need('運営通知', !!getSetting_(ID_KEYS.ADMIN_NOTIFY_TARGET) || !!getProp_(PROP_KEYS.ADMIN_EMAIL),
     'ADMIN_NOTIFY_TARGET（管理者LINE通知先ID・ID管理シート）または ADMIN_EMAIL（スクリプトプロパティ）');
   if (getSetting_(ID_KEYS.RESERVATION_API_BASE_URL)) {
@@ -300,7 +310,8 @@ function configWarnings_() {
   var w = [];
   if (getWebhookMode_() === WEBHOOK_MODES.DIRECT) {
     w.push('Webhook は GAS単体（direct）で受信しています。GAS はリクエストヘッダーを読めないため LINE の署名（X-Line-Signature）を検証できません。' +
-      '受信イベントは「未検証」として扱い、記録・通知は応答トークン確認後のみ、予約状態の変更・個人情報の開示・管理操作は Webhook からは行いません。');
+      '受信イベントは「未検証」として扱い、記録・通知は応答トークン確認後のみ行います。予約状態の変更・管理操作は Webhook からは行いません。' +
+      '予約内容は、本人確認済み（LINEアカウントに紐づく予約）の場合だけ、LINE が受理した応答トークンへの返信で表示します（プッシュでは送りません）。');
   }
   if (getProp_(PROP_KEYS.ALLOW_UNSIGNED_WEBHOOK)) {
     w.push('ALLOW_UNSIGNED_WEBHOOK は廃止しました（WEBHOOK_MODE で制御）。スクリプトプロパティから削除してください。');

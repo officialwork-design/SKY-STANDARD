@@ -168,11 +168,12 @@ test('表記揺れ（ひらがな・全角英字）を吸収', () => {
   assert.match(replyText(env), /よくあるご質問/);
 });
 
-test('優先順位: 「予約確認」は予約より優先され LIFF URL を返す', () => {
+test('優先順位: 「予約確認」は予約より優先され、LINE トークでの予約確認（予約IDの入力）を始める', () => {
   const env = envWith();
   env.setSetting('LIFF_ID', '1234567890-AbCdEfGh');
   send(env, textEvent('予約確認したいです'));
-  assert.equal(lastReply(env).messages[0].template.actions[0].uri, 'https://liff.line.me/1234567890-AbCdEfGh');
+  assert.match(replyText(env), /予約IDを入力してくださいませ/);
+  assert.ok(env.cache.get('rsv:' + USER));
 });
 
 test('優先順位: 「キャンセル料はいくら？」はキャンセル FAQ を回答し有人導線を付ける', () => {
@@ -229,7 +230,7 @@ test('問い合わせ: 種別選択 → 内容入力 → 保存・受付返信�
   env.setSetting('ADMIN_NOTIFY_TARGET', ADMIN);
   send(env, textEvent('お問い合わせ'));
   const cats = lastReply(env).messages[0].quickReply.items.map((i) => i.action.label);
-  assert.deepEqual(cats, ['フライト予約について', '予約内容の確認・変更', '天候・運航について', 'チャーター見積', 'その他のお問い合わせ', 'オペレーターに相談']);
+  assert.deepEqual(cats, ['チャーター見積', 'フライト予約について', 'その他のお問い合わせ', 'オペレーターに相談']);
 
   send(env, postbackEvent('a=inq_cat&c=4'));
   assert.match(replyText(env), /チャーター見積/);
@@ -242,6 +243,7 @@ test('問い合わせ: 種別選択 → 内容入力 → 保存・受付返信�
   assert.equal(rows[0]['内容'], '12/1に4名で東京から箱根へ');
   assert.equal(rows[0]['対応状況'], '未対応');
   assert.equal(rows[0]['LINEユーザーID'], USER);
+  assert.equal(rows[0]['自動返信有効'], false, 'チャーター見積は有人対応へ（自動返信停止）');
 
   const reply = replyText(env);
   assert.match(reply, new RegExp(rows[0]['受付ID']));
@@ -251,11 +253,13 @@ test('問い合わせ: 種別選択 → 内容入力 → 保存・受付返信�
   assert.equal(push.length, 1);
   assert.equal(push[0].json.to, ADMIN);
   assert.match(push[0].json.messages[0].text, /【重要】/);
+  assert.match(reply, /運航条件と料金を確認/);
+  assert.doesNotMatch(reply, /円|¥|料金は\d/, '料金を算出・確約しない');
 });
 
 test('問い合わせ入力中にメニュー操作をした場合は入力を取り消してメニューを優先', () => {
   const env = envWith();
-  send(env, postbackEvent('a=inq_cat&c=1'));
+  send(env, postbackEvent('a=inq_cat&c=5'));
   send(env, textEvent('FAQ'));
   assert.equal(env.rows('問い合わせ管理').length, 0);
   assert.match(replyText(env), /よくあるご質問/);
@@ -268,7 +272,8 @@ test('担当者に送る: 未一致メッセージを問い合わせとして登
   const rows = env.rows('問い合わせ管理');
   assert.equal(rows.length, 1);
   assert.equal(rows[0]['内容'], 'ペットは同乗できますか');
-  assert.match(rows[0]['備考'], /有人対応/);
+  assert.match(rows[0]['備考'], /担当者に送る/);
+  assert.equal(rows[0]['自動返信有効'], false);
 });
 
 test('問い合わせ内容の数式インジェクションを無害化', () => {
@@ -280,21 +285,22 @@ test('問い合わせ内容の数式インジェクションを無害化', () =>
 
 test('受付IDは連番で採番', () => {
   const env = envWith();
-  for (let i = 0; i < 2; i++) { send(env, postbackEvent('a=inq_cat&c=5')); send(env, textEvent('質問' + i)); }
+  for (const u of [USER, OTHER]) { send(env, postbackEvent('a=inq_cat&c=5', u)); send(env, textEvent('質問', u)); }
   const ids = env.rows('問い合わせ管理').map((r) => r['受付ID']);
   assert.ok(ids[0].endsWith('-0001') && ids[1].endsWith('-0002'));
 });
 
 /* ---------- リッチメニュー ---------- */
 
-test('リッチメニュー定義: 6 領域が全面を重複なく覆う', () => {
+test('リッチメニュー定義: 4 領域（上部全面＋下段3分割）が 1543×1019 を重複なく覆う', () => {
   const env = envWith();
   const d = env.ctx.buildRichMenuDefinition_().definition;
-  assert.equal(d.areas.length, 6);
+  assert.equal(d.areas.length, 4);
+  assert.deepEqual({ ...d.size }, { width: 1543, height: 1019 });
   let area = 0;
   d.areas.forEach((a) => { area += a.bounds.width * a.bounds.height; });
-  assert.equal(area, 2500 * 1686);
-  assert.deepEqual([...d.areas.map((a) => a.action.label)], ['フライト予約', '予約確認', 'プラン一覧', 'チャーター', 'お問い合わせ', 'よくある質問']);
+  assert.equal(area, 1543 * 1019);
+  assert.deepEqual([...d.areas.map((a) => a.action.label)], ['ご予約はこちら', '予約確認', 'お問い合わせ', 'よくある質問']);
 });
 
 test('リッチメニュー: URL 未設定ボタンは postback（ダミー URL を使わない）', () => {
@@ -302,10 +308,10 @@ test('リッチメニュー: URL 未設定ボタンは postback（ダミー URL 
   env.setSetting('BOOKING_SITE_URL', 'https://booking.example.jp/');
   const b = env.ctx.buildRichMenuDefinition_();
   assert.equal(b.definition.areas[0].action.type, 'uri');
-  assert.deepEqual([...b.unset], ['予約確認', 'プラン一覧', 'チャーター']);
-  assert.equal(b.definition.areas[2].action.type, 'postback');
-  assert.equal(b.definition.areas[4].action.text, 'お問い合わせ');
-  assert.equal(b.definition.areas[5].action.text, 'FAQ');
+  assert.deepEqual([...b.unset], ['よくある質問']);
+  assert.equal(b.definition.areas[1].action.data, 'a=rsv_start');
+  assert.equal(b.definition.areas[2].action.data, 'a=inq_start');
+  assert.equal(b.definition.areas[3].action.data, 'a=menu_unset&item=FAQ');
   send(env, postbackEvent('a=menu_unset&item=' + encodeURIComponent('プラン一覧')));
   assert.match(replyText(env), /準備中/);
 });
@@ -541,14 +547,14 @@ test('setupSheets は既存データを保持し、不足列・設定行のみ�
   const settingsBefore = env.sheets['LINE設定'].data.map((r) => r.slice());
   const idBefore = JSON.stringify(env.sheets['ID管理'].data);
   const r = env.ctx.setupSheets_();
-  assert.equal(JSON.stringify(env.sheets['ID管理'].data), idBefore);
+  assert.equal(JSON.stringify(env.sheets['ID管理'].data.slice(0, JSON.parse(idBefore).length)), idBefore);
   assert.equal(r.spreadsheetIdSet, true);
   assert.equal(env.props.SPREADSHEET_ID, '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es');
   assert.equal(JSON.stringify(env.sheets['FAQ'].data), before);
   assert.deepEqual([...r.columns['送信ログ']], ['冪等キー', 'イベントID', '再試行回数']);
   assert.deepEqual([...r.columns['予約管理']], ['集合場所', '注意事項', '最終イベント日時']);
   settingsBefore.forEach((row, i) => assert.deepEqual(env.sheets['LINE設定'].data[i].slice(0, 3), row));
-  assert.equal(r.idKeys.length, 0);
+  assert.deepEqual([...r.idKeys], ['FAQ_PAGE_URL']);
   assert.equal(r.missingSheets.length, 0);
   // 2回目は何も追加しない
   const r2 = env.ctx.setupSheets_();
