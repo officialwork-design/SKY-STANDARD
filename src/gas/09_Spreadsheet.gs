@@ -170,6 +170,29 @@ function sanitizeCell_(v) {
   return /^[=+\-@]/.test(v) ? "'" + v : v;
 }
 
+/**
+ * 「LINE操作ログ」シートを取得（なければ作成してヘッダーを書く）。既存シートの行は変更せず、不足列だけ末尾に補完する。
+ * @param {boolean=} light true なら列の補完を行わない（Webhook 処理中の書き込み用）
+ * @return {{sheet:Sheet, created:boolean, addedColumns:string[]}}
+ */
+function ensureOpLogSheet_(light) {
+  var ss = getSpreadsheet_();
+  var sh = ss.getSheetByName(OPLOG.SHEET);
+  var created = false;
+  if (!sh) {
+    sh = ss.insertSheet(OPLOG.SHEET);
+    sh.getRange(1, 1, 1, OPLOG.HEADERS.length).setValues([OPLOG.HEADERS]);
+    sh.setFrozenRows(1);
+    try { sh.getRange(1, 1, 1, OPLOG.HEADERS.length).setFontWeight('bold'); } catch (e) { /* 書式は任意 */ }
+    created = true;
+  } else if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, OPLOG.HEADERS.length).setValues([OPLOG.HEADERS]);
+  }
+  // light（Webhook からの書き込み）は列の確認を省く（読み取り回数を減らす。列の補完は「シート列・設定行の補完」で行う）
+  var added = created || light ? [] : ensureColumns_(OPLOG.SHEET, OPLOG.HEADERS);
+  return { sheet: sh, created: created, addedColumns: added };
+}
+
 /** スクリプトロック内で処理（同時実行対策） */
 function withLock_(fn, timeoutMs) {
   var lock = LockService.getScriptLock();

@@ -18,6 +18,7 @@
  *   testStatus           … 問い合わせ・有人対応・エラーログの状態を表示
  *   testResumeAutoReply  … 最新の有人対応を終了（自動返信有効=TRUE）
  *   testClearSiteUrls    … BOOKING_SITE_URL・FAQ_PAGE_URL を空欄にする（「準備中」案内の確認用。再登録が必要）
+ *   testDiagnose         … LINEシステム診断（読み取り専用。LINE には GET のみ。メッセージは送らない）
  */
 
 var TEST_ENV = {
@@ -313,3 +314,14 @@ function testClearSiteUrls() {
   return testOut_('testClearSiteUrls', ['BOOKING_SITE_URL・FAQ_PAGE_URL を空欄にしました（テスト用 ID管理）。testDeployRichMenu で再登録すると「準備中」表示になります。',
     '戻すときは testSetup を再実行してください（空欄の項目だけテストサイトの URL を入れます）。']);
 }
+
+/**
+ * LINEシステム診断（管理メニューと同じ処理。読み取り専用）。テスト用チャネルでのみ実行する。
+ * 自動返信の停止・設定警告・LINE操作ログの集計を、テスト用スプレッドシートで確認できる。
+ */
+function testDiagnose() {
+  testGuard_({ needSheet: true, needLine: true });
+  var r = adminRun('lineDiagnose');
+  return testOut_('testDiagnose', [r.title + (r.ok ? '' : '（要対応あり）'), r.message]);
+}
+

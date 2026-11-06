@@ -49,6 +49,7 @@ function buildMenu_() {
     .addSubMenu(ui.createMenu('システム管理')
       .addItem('トリガー設定', 'skyMenuInstallTriggers')
       .addItem('トリガー状態確認', 'skyMenuTriggerStatus')
+      .addItem('LINEシステム診断', 'skyMenuLineDiagnose')
       .addItem('接続・設定診断', 'skyMenuDiagnose')
       .addSeparator()
       .addItem('エラーログを開く', 'skyMenuOpenErrorLog')
@@ -283,6 +284,9 @@ function cleanupLocalTriggers_() {
 function skyMenuTriggerStatus() { return run_('triggerStatus'); }
 
 function skyMenuDiagnose() { return run_('diagnose'); }
+
+/** LINEシステム診断（読み取り専用。返信が届かない原因の確認用） */
+function skyMenuLineDiagnose() { return run_('lineDiagnose'); }
 
 /* ---------- エラーログ ---------- */
 

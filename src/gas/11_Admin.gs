@@ -174,6 +174,7 @@ var ADMIN_ACTIONS = {
   templates: function () { return adminTemplates_(); },
   /* システム管理 */
   diagnose: function (p) { return adminDiagnose_(p); },
+  lineDiagnose: function () { return adminLineDiagnose_(); },
   invalidateCache: function () {
     invalidateIdCache_();
     return { ok: true, title: '設定を再読込しました', message: '「ID管理」シートのキャッシュを破棄しました。次の処理から新しい値が使われます。' };
@@ -258,7 +259,11 @@ function setupSheets_() {
         }
       });
     }
-    report.errorLogCreated = ensureErrorLogSheet_().created;
+    var el = ensureErrorLogSheet_();
+    report.errorLogCreated = el.created;
+    report.errorLogAddedColumns = el.addedColumns || [];
+    var ol = ensureOpLogSheet_();
+    report.opLogCreated = ol.created;
     if (report.missingSheets.indexOf(SHEETS.INQUIRIES) === -1) report.inquiryStatusValidation = ensureInquiryStatusValidation_();
     var tplIds = readRows_(SHEETS.TEMPLATES).map(function (r) { return String(r['テンプレートID']); });
     DEFAULT_TEMPLATES.forEach(function (t) {
@@ -281,7 +286,9 @@ function adminSetupSheets_() {
     '・追加した列：' + (cols.length ? '\n' + cols.join('\n') : 'なし'),
     '・ID管理に追加した設定キー：' + (r.idKeys.join('、') || 'なし'),
     '・追加した通知テンプレート（有効=OFF）：' + (r.templates.join('、') || 'なし'),
-    '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み'),
+    '・エラーログシート：' + (r.errorLogCreated ? '新規作成しました' : '作成済み') +
+      (r.errorLogAddedColumns && r.errorLogAddedColumns.length ? '（追加した列：' + r.errorLogAddedColumns.join('、') + '）' : ''),
+    '・LINE操作ログシート：' + (r.opLogCreated ? '新規作成しました' : '作成済み'),
     '・問い合わせ管理の選択肢（対応状況：未対応／対応中／お客様回答待ち／見積・社内確認中／完了／キャンセル・取下げ、自動返信有効：TRUE／FALSE）：' + (r.inquiryStatusValidation ? '設定しました（既存の値はそのまま）' : '未設定（列またはシートがありません）'),
     '\n既存のデータ・行は変更していません。'
   ];
@@ -540,6 +547,228 @@ function adminDiagnose_(p) {
     return keys.length ? keys.map(function (k) { return '  ' + k + ': ' + count[k] + ' 件'; }).join('\n') : '  記録なし';
   });
   return { ok: true, title: '接続・設定診断', message: out.join('\n\n') };
+}
+
+/* ---------- LINEシステム診断（読み取り専用） ---------- */
+
+/** リッチメニュー・ボタンの postback で、このコードが処理できる a= の値（01_Webhook.gs の dispatchPostback_） */
+var SUPPORTED_POSTBACK_ACTIONS = ['rsv_start', 'rsv_cancel', 'rsv_change', 'rsv_cancel_req', 'inq_start', 'inq_cat', 'inq_cancel',
+  'inq_handoff', 'inq_operator', 'faq', 'faq_list', 'menu_unset'];
+
+/**
+ * 「LINEシステム診断」。返信が届かない原因を、管理者が日本語で確認できるようにまとめる。
+ * 読み取り専用：シートの作成・設定値の変更・スクリプトプロパティの保存・LINE へのメッセージ送信は行わない
+ * （LINE API は GET のみ。Web アプリの版確認は doGet のヘルスチェックのみ）。
+ *   【要対応】… 返信が届かない・機能が動かない可能性が高い
+ *   【注意】  … 運用上の確認が必要（設定による意図的な停止を含む）
+ *   【OK】／【情報】
+ */
+function adminLineDiagnose_() {
+  var out = [];
+  var actions = [];   // 対応が必要な内容
+  var keys = {};      // 対応が必要な設定キー
+  var count = { need: 0, warn: 0 };
+  function need(msg, k) { count.need++; actions.push(msg); (k || []).forEach(function (x) { keys[x] = true; }); return '【要対応】' + msg; }
+  function warn(msg, k) { count.warn++; (k || []).forEach(function (x) { keys[x] = true; }); return '【注意】' + msg; }
+  function sec(title, fn) {
+    var lines;
+    try { lines = fn(); } catch (e) { lines = [need(title + 'を確認できませんでした：' + sanitizeErrorText_(e && e.message || e))]; }
+    out.push('◆ ' + title + '\n' + [].concat(lines).filter(String).join('\n'));
+  }
+  var hasToken = !!getProp_(PROP_KEYS.CHANNEL_ACCESS_TOKEN);
+  var ss = getSpreadsheet_();
+  invalidateIdCache_();
+
+  sec('Webhook（LINE → GAS）', function () {
+    var l = [];
+    var mode = getWebhookMode_();
+    l.push('【情報】受信方式：' + (mode === WEBHOOK_MODES.DIRECT ? 'GAS単体（direct・署名検証なし）' : 'リレー経由（relay）'));
+    var gasUrl = getSetting_(ID_KEYS.GAS_WEBAPP_URL);
+    if (!gasUrl) l.push(need('ID管理 GAS_WEBAPP_URL が未設定です。Web アプリの版と Webhook URL を確認できません。', ['GAS_WEBAPP_URL']));
+    else {
+      var b = fetchDeployedBuild_();
+      if (b.build === null) l.push(warn('Web アプリの版を取得できません（' + b.error + '）'));
+      else if (b.build === APP.BUILD) l.push('【OK】Web アプリは保存済みコードと同じ版です（' + APP.BUILD + '）');
+      else l.push(need('Web アプリが古い版です（デプロイ済み: ' + (b.build || '版情報なし') + ' / 保存済み: ' + APP.BUILD + '）。既存のデプロイを新バージョンで更新してください（URL は変わりません）。'));
+    }
+    if (hasToken) {
+      try {
+        var wh = lineFetch_('get', '/v2/bot/channel/webhook/endpoint').body || {};
+        if (!wh.active) l.push(need('LINE Developers の「Webhook の利用」がオフです。メッセージ・リッチメニューの操作が GAS に届きません。'));
+        else l.push('【OK】Webhook の利用：オン');
+        if (!wh.endpoint) l.push(need('LINE 側に Webhook URL が登録されていません。'));
+        else if (mode === WEBHOOK_MODES.DIRECT && gasUrl && wh.endpoint !== gasUrl) {
+          l.push(need('LINE 側の Webhook URL が ID管理 の GAS_WEBAPP_URL と一致しません（LINE 側: ' + wh.endpoint + '）。別の Web アプリに届いている可能性があります。', ['GAS_WEBAPP_URL']));
+        } else l.push('【OK】Webhook URL：' + wh.endpoint);
+      } catch (e) { l.push(warn('LINE 側の Webhook 設定を取得できません（' + lineErrorHint_(e).split('\n')[0] + '）')); }
+    }
+    var last = Number(getProp_(PROP_KEYS.LAST_WEBHOOK_AT) || 0);
+    l.push('【情報】最終 Webhook 受信：' + (last ? Utilities.formatDate(new Date(last), APP.TIMEZONE, 'yyyy/MM/dd HH:mm:ss') : '記録なし') +
+      '（送信元は検証していません）');
+    l.push('【情報】GAS に Webhook が届かない場合（URL の誤り・LINE 側の障害・Webhook オフ）は、GAS には何も記録されません。' +
+      'LINE で操作しても「LINE操作ログ」に行が増えない場合は、LINE Developers の Webhook 設定と「検証」ボタンで確認してください。');
+    return l;
+  });
+
+  sec('LINE API の認証', function () {
+    if (!hasToken) return [need('スクリプトプロパティ LINE_CHANNEL_ACCESS_TOKEN が未設定です。LINE に返信できません。', ['LINE_CHANNEL_ACCESS_TOKEN'])];
+    try {
+      var info = lineFetch_('get', '/v2/bot/info').body || {};
+      var l = ['【OK】チャネルアクセストークンは有効です（' + (info.displayName || '-') + ' / ' + (info.basicId || '-') + '）'];
+      if (info.chatMode === 'bot') l.push(warn('チャットがオフです。オペレーター対応（有人対応）で担当者がチャット画面から返信できません。'));
+      return l;
+    } catch (e) {
+      if (e && e.status === 401) return [need('チャネルアクセストークンが無効です（HTTP 401）。LINE に返信できません。トークンを再発行してスクリプトプロパティを更新してください。', ['LINE_CHANNEL_ACCESS_TOKEN'])];
+      return [warn('LINE API に接続できません（' + lineErrorHint_(e).split('\n')[0] + '）')];
+    }
+  });
+
+  sec('予約確認', function () {
+    var l = [];
+    var raw = String(getIdRaw_(ID_KEYS.RESERVATION_CHECK_MODE) || '').trim();
+    var mode = reservationCheckMode_();
+    if (raw && !ID_KEYS.RESERVATION_CHECK_MODE.pattern.test(raw)) {
+      l.push(need('ID管理 RESERVATION_CHECK_MODE の値「' + raw.substring(0, 20) + '」が正しくありません（LINE_LINKED または OFF）。現在は予約内容を表示しない設定（OFF）として動作しています。', ['RESERVATION_CHECK_MODE']));
+    } else if (mode === 'OFF') {
+      l.push('【OK】RESERVATION_CHECK_MODE＝' + (raw || '空欄') + '（予約内容は表示せず、予約IDを添えてオペレーターへ案内する運用。現在の正常な設定です）');
+    } else {
+      l.push('【情報】RESERVATION_CHECK_MODE＝LINE_LINKED（予約管理の LINEユーザーID が一致する予約だけ表示）');
+    }
+    var sh = ss.getSheetByName(SHEETS.RESERVATIONS);
+    if (!sh) { l.push(mode === 'OFF' ? warn('「予約管理」シートがありません。') : need('「予約管理」シートがありません。予約確認で「確認できません」と案内されます。')); return l; }
+    var headers = getHeaders_(sh);
+    var lack = RESERVATION_LOOKUP_COLUMNS.filter(function (c) { return headers.indexOf(c) === -1; });
+    if (lack.length) l.push(mode === 'OFF' ? warn('「予約管理」に必要な列がありません：' + lack.join('、')) : need('「予約管理」に必要な列がありません：' + lack.join('、') + '。予約確認で「確認できません」と案内されます。'));
+    var rows = readRows_(SHEETS.RESERVATIONS);
+    var seen = {}, dup = {};
+    rows.forEach(function (r) { var k = String(r['予約ID'] || '').trim().toUpperCase(); if (!k) return; if (seen[k]) dup[k] = true; seen[k] = true; });
+    var dupIds = Object.keys(dup);
+    l.push('【情報】予約管理の行数：' + rows.length + ' 件' + (mode === 'LINE_LINKED' ? '（LINEユーザーID あり ' +
+      rows.filter(function (r) { return String(r['LINEユーザーID'] || '').trim(); }).length + ' 件）' : ''));
+    if (dupIds.length) l.push(warn('同じ予約IDの行が複数あります（' + dupIds.length + ' 件。例 ' + dupIds.slice(0, 3).join('、') + '）。該当の予約は表示されません。'));
+    if (getSetting_(ID_KEYS.RESERVATION_API_BASE_URL)) l.push('【情報】予約サイト API（RESERVATION_API_BASE_URL）が設定されています。');
+    return l;
+  });
+
+  sec('問い合わせ・自動返信', function () {
+    var l = [];
+    var sh = ss.getSheetByName(SHEETS.INQUIRIES);
+    if (!sh) return [need('「問い合わせ管理」シートがありません。問い合わせを保存できません。')];
+    var headers = getHeaders_(sh);
+    var lack = REQUIRED_COLUMNS[SHEETS.INQUIRIES].filter(function (c) { return headers.indexOf(c) === -1; });
+    if (lack.length) l.push(warn('「問い合わせ管理」に列がありません：' + lack.join('、') + '（「シート列・設定行の補完」で追加できます）'));
+    var byUser = inquiryRowsByUser_();
+    var stopped = [], invalid = 0;
+    Object.keys(byUser).forEach(function (u) {
+      var d = decideAutoReply_(byUser[u]);
+      invalid += d.invalid.length;
+      if (!d.enabled) stopped.push(String(d.row && d.row['受付ID'] || ''));
+    });
+    if (stopped.length) {
+      l.push(warn(stopped.length + ' 名の顧客の自動返信が停止中です（自動返信有効=FALSE。判定行の受付ID：' + stopped.slice(0, 5).join('、') +
+        (stopped.length > 5 ? ' ほか' : '') + '）。この顧客には、リッチメニュー・予約確認・お問い合わせを含めて一切返信しません。' +
+        '有人対応が終わったら、その行の自動返信有効を TRUE に戻してください。', ['問い合わせ管理:' + OPERATOR.COL]));
+    } else l.push('【OK】自動返信を停止中の顧客はいません');
+    if (invalid) l.push(warn('自動返信有効に TRUE / FALSE 以外の値が ' + invalid + ' 行あります（判定に使われません）。', ['問い合わせ管理:' + OPERATOR.COL]));
+    if (!getSetting_(ID_KEYS.ADMIN_NOTIFY_TARGET) && !getProp_(PROP_KEYS.ADMIN_EMAIL)) {
+      l.push(warn('運営通知の送信先（ID管理 ADMIN_NOTIFY_TARGET またはスクリプトプロパティ ADMIN_EMAIL）が未設定です。問い合わせを受け付けても運営に通知されません（受付・保存・返信は行います）。',
+        ['ADMIN_NOTIFY_TARGET', 'ADMIN_EMAIL']));
+    } else l.push('【OK】運営通知の送信先：設定済み');
+    return l;
+  });
+
+  sec('リッチメニュー', function () {
+    var l = [];
+    [ID_KEYS.BOOKING_SITE_URL, ID_KEYS.FAQ_PAGE_URL].forEach(function (def) {
+      var raw = String(getIdRaw_(def) || '').trim();
+      var url = getUrlSetting_(def);
+      if (url) l.push('【OK】' + def.key + '：' + url);
+      else if (raw) l.push(need('ID管理 ' + def.key + ' の値が https の URL ではありません。ボタンは「準備中」表示になります。', [def.key]));
+      else l.push(warn('ID管理 ' + def.key + ' が未設定です。ボタンは「準備中」表示になります。', [def.key]));
+    });
+    var img = getSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID);
+    if (!img) l.push(warn('ID管理 RICHMENU_IMAGE_FILE_ID が未設定です（リッチメニューを再登録できません）。', ['RICHMENU_IMAGE_FILE_ID']));
+    if (!hasToken) return l;
+    var current = null, id = '';
+    try {
+      id = lineFetch_('get', '/v2/bot/user/all/richmenu').body.richMenuId;
+      current = lineFetch_('get', '/v2/bot/richmenu/' + encodeURIComponent(id)).body || {};
+    } catch (e) {
+      if (e && e.status === 404) { l.push(need('既定のリッチメニューが LINE に登録されていません。')); return l; }
+      l.push(warn('LINE のリッチメニューを取得できません（' + lineErrorHint_(e).split('\n')[0] + '）')); return l;
+    }
+    l.push('【情報】LINE の既定リッチメニュー：' + id + '（' + ((current.size || {}).width || '?') + '×' + ((current.size || {}).height || '?') + '・' + (current.areas || []).length + '領域）');
+    var recorded = getProp_('CURRENT_RICHMENU_ID');
+    if (recorded && recorded !== id) l.push(warn('管理メニューで最後に登録したメニュー（' + recorded + '）と、LINE の既定メニューが異なります。LINE Official Account Manager 等で切り替えられた可能性があります。'));
+    var unsupported = [];
+    (current.areas || []).forEach(function (a) {
+      var act = a.action || {};
+      if (act.type !== 'postback') return;
+      var aa = (String(act.data || '').match(/(?:^|&)a=([^&]*)/) || [])[1] || '';
+      if (SUPPORTED_POSTBACK_ACTIONS.indexOf(aa) === -1) unsupported.push((act.label || '?') + '（a=' + aa + '）');
+    });
+    if (unsupported.length) l.push(need('LINE のリッチメニューに、このコードが処理できないボタンがあります：' + unsupported.join('、') + '。タップしても返信されません。'));
+    var cmp = compareRegisteredRichMenu_();
+    if (cmp.error) l.push(warn('登録内容と設定を比較できません（' + cmp.error + '）'));
+    else if (cmp.needsUpdate) l.push(warn('LINE の登録内容と現在の設定が一致しません（再登録で反映）：\n    ' + cmp.diffs.join('\n    ')));
+    else l.push('【OK】LINE の登録内容は現在の設定と一致しています');
+    l.push('【情報】リンク（URL）のボタン（ご予約はこちら・よくある質問）は LINE が直接ページを開くため、GAS には記録されません。');
+    return l;
+  });
+
+  sec('ログ（直近）', function () {
+    var l = [];
+    var now = Date.now();
+    var el = ss.getSheetByName(ERROR_LOG.SHEET);
+    if (!el) l.push('【情報】エラーログシートはまだありません（エラーが発生すると作成されます）');
+    else {
+      var cnt = { d1: {}, d7: {} }, open = 0;
+      readRows_(ERROR_LOG.SHEET).forEach(function (r) {
+        var t = parseEventTime_(r['発生日時']);
+        var lv = String(r['重要度'] || 'ERROR');
+        if (String(r['対応状況'] || '未対応') === '未対応' && (lv === 'ERROR' || lv === 'FATAL')) open++;
+        if (!t) return;
+        if (now - t.getTime() <= 86400000) cnt.d1[lv] = (cnt.d1[lv] || 0) + 1;
+        if (now - t.getTime() <= 7 * 86400000) cnt.d7[lv] = (cnt.d7[lv] || 0) + 1;
+      });
+      var fmt = function (c) { return ['FATAL', 'ERROR', 'WARNING', 'CONFIG_WARNING'].map(function (k) { return k + ' ' + (c[k] || 0); }).join(' / '); };
+      l.push('【情報】エラーログ 24時間：' + fmt(cnt.d1));
+      l.push('【情報】エラーログ 7日間：' + fmt(cnt.d7));
+      var errs7 = (cnt.d7.ERROR || 0) + (cnt.d7.FATAL || 0);
+      if (errs7) l.push(warn('直近7日間にエラーが ' + errs7 + ' 件あります（未対応のエラー：' + open + ' 件）。「エラーログ」シートで原因コードを確認してください。'));
+      if (cnt.d7.CONFIG_WARNING) l.push(warn('直近7日間に設定警告（CONFIG_WARNING）が ' + cnt.d7.CONFIG_WARNING + ' 件あります。設定によって返信を止めた記録です。'));
+    }
+    var ol = ss.getSheetByName(OPLOG.SHEET);
+    if (!ol) l.push('【情報】LINE操作ログシートはまだありません（最初の Webhook 受信、または「シート列・設定行の補完」で作成されます）');
+    else {
+      var last = ol.getLastRow();
+      var c = {};
+      if (last > 1) {
+        var from = Math.max(2, last - 2000 + 1);
+        var data = ol.getRange(from, 1, last - from + 1, OPLOG.HEADERS.length).getValues();
+        data.forEach(function (r) {
+          var t = parseEventTime_(r[0]);
+          if (t && now - t.getTime() <= 86400000) c[r[4]] = (c[r[4]] || 0) + 1;
+        });
+      }
+      var R = OPLOG.RESULT;
+      l.push('【情報】LINE操作ログ 24時間：受信 ' + (c[R.RECEIVED] || 0) + ' / 返信成功 ' + (c[R.REPLY_OK] || 0) + ' / 返信失敗 ' + (c[R.REPLY_FAILED] || 0) +
+        ' / 返信なし ' + (c[R.NO_REPLY] || 0) + ' / 設定により停止 ' + (c[R.STOPPED] || 0) + ' / 異常終了 ' + (c[R.FAILED] || 0) + '（直近2,000行から集計）');
+      if (c[R.REPLY_FAILED] || c[R.FAILED]) l.push(warn('直近24時間に返信失敗・異常終了があります。LINE操作ログの追跡IDでエラーログを確認してください。'));
+      if (last - 1 >= OPLOG.WARN_ROWS) l.push(warn('LINE操作ログが ' + (last - 1) + ' 行あります。古い行を別のファイルに移してください（自動では削除しません）。'));
+    }
+    return l;
+  });
+
+  var keyList = Object.keys(keys);
+  var head = [
+    count.need ? '【要対応】' + count.need + ' 件 ／ 【注意】' + count.warn + ' 件' : (count.warn ? '【注意】' + count.warn + ' 件（要対応はありません）' : '【OK】問題は見つかりませんでした'),
+    keyList.length ? '対応が必要な設定キー：' + keyList.join('、') : '対応が必要な設定キー：なし',
+    actions.length ? '要対応の内容：\n  ・' + actions.join('\n  ・') : '',
+    '（この診断は読み取りのみです。設定値の変更や、利用者への LINE 送信は行いません）'
+  ].filter(String).join('\n');
+  return { ok: count.need === 0, title: 'LINEシステム診断', message: head + '\n\n' + out.join('\n\n'),
+    data: { need: count.need, warn: count.warn, keys: keyList } };
 }
 
 /* ---------- トリガー（独立GAS側に作成） ---------- */

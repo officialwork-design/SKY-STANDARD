@@ -261,15 +261,24 @@ function processLineEvents_(events, trust) {
     __replySent = false;
     __pendingAfterReply = null;
     __eventTrust = { verified: !!(trust && trust.verified) };
+    var failure = null;
+    // 追跡開始（LINE操作ログ：受信 → 処理 → 返信 → 終了）。重複受信（上の claimEvent_）は記録しない
+    try { traceBegin_(ev); } catch (e) { __trace = null; }
     try {
       dispatchEvent_(ev);
       handled++;
     } catch (err) {
+      failure = err;
       if (!__eventTrust.verified && err instanceof LineApiError && err.status === 400 && /Invalid reply token/i.test(String(err.body || ''))) {
-        // 未検証イベントの応答トークンが LINE に拒否された＝偽造・期限切れの可能性。システムエラーではないため警告のみ
+        // 未検証イベントの応答トークンが LINE に拒否された＝偽造・期限切れの可能性。システム障害ではないため WARNING
         logWarn_('webhook.unverified_reply_rejected', { type: ev.type });
+        // 偽装リクエストでシートが増え続けないよう、この場合は LINE操作ログに書かない（エラーログに10分に1件）
+        if (__trace) __trace.skip = true;
+        logIncident_(LOG_LEVEL.WARNING, 'line.reply_rejected', 'LINE が応答トークンを受け付けませんでした（期限切れ・偽装リクエストの可能性）。返信は届いていません。',
+          { cause: CAUSE.LINE_API_INVALID_REPLY_TOKEN, result: '返信失敗', detail: { type: ev.type } });
       } else {
-        logError_('webhook.event_failed', err, { type: ev.type, verified: __eventTrust.verified });
+        logError_('webhook.event_failed', err, { type: ev.type, verified: __eventTrust.verified },
+          { result: __replySent ? '返信後に失敗' : '返信失敗' });
       }
       // 利用者へ未応答かつ一時的な失敗なら登録を解除し、LINE の再送で再処理できるようにする。
       // （応答済み、または 400 等の恒久エラーは再処理しても改善しないため解除しない）
@@ -279,6 +288,7 @@ function processLineEvents_(events, trust) {
         retryable++;
       }
     } finally {
+      try { traceEnd_(failure); } catch (e) { __trace = null; }
       __eventTrust = { verified: false };
     }
   });
@@ -313,6 +323,7 @@ function dispatchEvent_(ev) {
   if (userId && ev.source.type === 'user' && ev.type !== 'unfollow' && isOperatorMode_(userId)) {
     return handleOperatorModeEvent_(ev, userId);
   }
+  traceStage_('処理の振り分け：' + (__trace ? __trace.op : ev.type), OPLOG.RESULT.STARTED, '');
   switch (ev.type) {
     case 'follow':
       return handleFollow_(ev, userId);
@@ -440,7 +451,15 @@ function dispatchPostback_(ev, userId, p) {
       if (p.item === 'BOOKING_CHECK' || p.item === '予約確認') return startReservationCheck_(ev, userId);
       return replyMessage_(ev.replyToken, buildRichMenuPendingReply_(p.item));
     default:
+      // 未対応の postback（リッチメニュー・ボタンの data が現在のコードと合っていない）。従来どおり返信はしない
       logInfo_('postback.unknown', { a: String(p.a || '').substring(0, 20) });
+      if (__trace) { __trace.cause = CAUSE.UNSUPPORTED_POSTBACK; __trace.reported = true; }
+      traceStage_('未対応の postback', OPLOG.RESULT.IGNORED, CAUSE.UNSUPPORTED_POSTBACK);
+      // 値（a=）は補足に入れ、メッセージは固定にする（偽装リクエストで a= を変えてもエラーログが増えないよう、10分に1件）
+      logIncident_(LOG_LEVEL.WARNING, 'richmenu.unsupported_postback',
+        '未対応の postback を受信しました（返信していません）。リッチメニュー・ボタンの設定がコードと合っているか「LINEシステム診断」で確認してください。',
+        { cause: CAUSE.UNSUPPORTED_POSTBACK, settingKeys: ['RICHMENU_IMAGE_FILE_ID'], result: '返信なし',
+          detail: { action: String(p.a || '').replace(/[^A-Za-z0-9_]/g, '').substring(0, 20) } });
   }
 }
 

@@ -221,3 +221,15 @@ test('testSeedReservations：予約ID重複のダミー（2行）も登録する
   const rows = rowsOf(testSheet(e).getSheetByName('予約管理'));
   assert.equal(rows.filter((r) => /-DDDDDD$/.test(r['予約ID'])).length, 2);
 });
+
+test('testDiagnose：本番の公式アカウントでは止まり、テスト用チャネルでは LINEシステム診断を表示（送信なし）', () => {
+  const p = env({ basicId: '@686mdyho', props: { LINE_CHANNEL_ACCESS_TOKEN: 'tok' } });
+  p.ctx.testSetup();
+  assert.throws(() => p.ctx.testDiagnose(), /本番の公式アカウント/);
+  const e = env({ props: { LINE_CHANNEL_ACCESS_TOKEN: 'tok' } });
+  e.ctx.testSetup();
+  const out = e.ctx.testDiagnose();
+  assert.match(out, /LINEシステム診断/);
+  assert.match(out, /◆ 予約確認/);
+  assert.equal(e.calls.filter((c) => (c.method || 'get') !== 'get').length, 0, 'LINE に送信していない');
+});

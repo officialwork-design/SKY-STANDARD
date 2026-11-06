@@ -4,7 +4,7 @@
 
 ## 1. リッチメニュー（4領域）
 
-登録済み：`richmenu-b7381e62ad819d8d7adb1bde3b55afe9`（2026-10-30）。画像：Google ドライブ「SKY_STANDARD_LINE_2500x1686.jpg」（ファイルID `140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA`、2500×1686）
+登録済み：`richmenu-a77466a8ad199fbac64d4c011468831b`（2026-11-06）。画像：Google ドライブ「SKY_STANDARD_LINE_2500x1686.jpg」（ファイルID `140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA`、2500×1686）
 
 | 領域 | 表示 | タップ領域（px） | 動作 | postback／URL |
 |---|---|---|---|---|

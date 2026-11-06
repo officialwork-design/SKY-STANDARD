@@ -26,7 +26,8 @@ test('logError_ で「エラーログ」シートを作成し、8項目を記録
   assert.equal(e.sheets[SHEET], undefined);
   e.ctx.logError_('notify.push_failed', new Error('LINE API error 500: boom'), { sendId: 'SND-1', type: 'BOOKING_CONFIRMED' });
   const sh = e.sheets[SHEET];
-  assert.deepEqual([...sh.data[0]], ['発生日時', '重要度', '発生元', '関数名', 'エラーメッセージ', 'エラー詳細・スタックトレース', '関連ID', '対応状況']);
+  assert.deepEqual([...sh.data[0]], ['発生日時', '重要度', '発生元', '関数名', 'エラーメッセージ', 'エラー詳細・スタックトレース', '関連ID', '対応状況',
+    'イベント種別', '追跡ID', '原因コード', '処理結果', '関連設定キー', 'HTTPステータス']);
   const r = errRows(e)[0];
   assert.match(r['発生日時'], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.equal(r['重要度'], 'ERROR');
@@ -39,7 +40,9 @@ test('logError_ で「エラーログ」シートを作成し、8項目を記録
   assert.equal(r['対応状況'], '未対応');
   assert.equal(sh.fmt.frozenRows, 1);
   assert.ok(sh.fmt.filter);
-  assert.deepEqual(sh.fmt.rules.map((x) => x.formula), ['=$B2="FATAL"', '=$B2="ERROR"']);
+  assert.deepEqual(sh.fmt.rules.map((x) => x.formula), ['=$B2="FATAL"', '=$B2="ERROR"', '=$B2="CONFIG_WARNING"']);
+  assert.equal(r['原因コード'], 'NOTIFY_FAILED');
+  assert.equal(r['HTTPステータス'], '');
   assert.ok(sh.fmt.validations.some((v) => v.col === 8 && v.v.list.includes('未対応')));
 });
 
@@ -120,13 +123,17 @@ test('ログ書き込みに失敗しても例外を出さず、Webhook は HTTP 
   assert.ok(e.logs.some((l) => /errorlog\.write_failed/.test(l)));
 });
 
-test('Webhook のエラー（LINE API 5xx）は記録、偽造イベントの応答拒否（400）は記録しない', () => {
+test('Webhook のエラー（LINE API 5xx）は ERROR、偽造・期限切れの応答拒否（400）は WARNING（同じ原因は10分に1件）', () => {
   const ulid = () => crypto.randomBytes(13).toString('hex').toUpperCase().slice(0, 26);
   const ev = () => ({ type: 'message', webhookEventId: ulid(), timestamp: Date.now(), replyToken: crypto.randomBytes(16).toString('hex'),
     source: { type: 'user', userId: USER }, message: { type: 'text', text: '予約' } });
   const e400 = env({ fetch: (url) => (url.indexOf('/reply') !== -1 ? { code: 400, body: { message: 'Invalid reply token' } } : { code: 200, body: {} }) });
   e400.doPost({ destination: BOT, events: [ev()] });
-  assert.equal(errRows(e400).length, 0);
+  e400.doPost({ destination: BOT, events: [ev()] });
+  assert.equal(errRows(e400).length, 1, '重複は抑制');
+  assert.equal(errRows(e400)[0]['重要度'], 'WARNING');
+  assert.equal(errRows(e400)[0]['原因コード'], 'LINE_API_400_INVALID_REPLY_TOKEN');
+  assert.equal(errRows(e400)[0]['処理結果'], '返信失敗');
   const e500 = env({ fetch: (url) => (url.indexOf('/reply') !== -1 ? { code: 500, body: { message: 'Internal' } } : { code: 200, body: {} }) });
   e500.doPost({ destination: BOT, events: [ev()] });
   const rows = errRows(e500);
@@ -134,6 +141,10 @@ test('Webhook のエラー（LINE API 5xx）は記録、偽造イベントの応
   assert.equal(rows[0]['発生元'], 'Webhook');
   assert.match(rows[0]['エラーメッセージ'], /LINE API error 500/);
   assert.match(rows[0]['エラー詳細・スタックトレース'], /HTTP ステータス: 500/);
+  assert.equal(rows[0]['原因コード'], 'LINE_API_5XX');
+  assert.equal(rows[0]['HTTPステータス'], 500);
+  assert.equal(rows[0]['イベント種別'], 'message');
+  assert.match(rows[0]['追跡ID'], /^[0-9A-F]{26}$/);
 });
 
 test('通知の LINE 送信失敗は記録（通知）', () => {
@@ -216,7 +227,7 @@ test('設定確認は既存のエラーログ行・他シートを変更しな�
   e.ctx.adminRun('errorLogStatus');
   e.ctx.adminRun('errorLogStatus');
   assert.equal(JSON.stringify(Object.fromEntries(Object.entries(e.sheets).map(([k, v]) => [k, v.data]))), snapshot);
-  assert.equal(e.sheets[SHEET].fmt.rules.length, 2); // 色分けルールが重複しない
+  assert.equal(e.sheets[SHEET].fmt.rules.length, 3); // 色分けルールが重複しない
 });
 
 test('シート補完でエラーログシートを作成。診断にエラーログの件数を表示', () => {

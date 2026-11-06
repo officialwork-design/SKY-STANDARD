@@ -47,7 +47,15 @@ function lineFetch_(method, path, payload, opts) {
     params.payload = JSON.stringify(payload);
   }
   var base = opts.dataApi ? APP.LINE_DATA_API_BASE : APP.LINE_API_BASE;
-  var res = UrlFetchApp.fetch(base + path, params);
+  var res;
+  try {
+    res = UrlFetchApp.fetch(base + path, params);
+  } catch (e) {
+    // 通信エラー（タイムアウト・DNS 等）。HTTP 応答を確認できないため成功とは扱わない（再試行可能）
+    var ne = new LineApiError(0, sanitizeErrorText_(e && e.message), true);
+    ne.network = true;
+    throw ne;
+  }
   var code = res.getResponseCode();
   var text = res.getContentText();
   // X-Line-Retry-Key 重複時（409）は既に受理済み＝成功扱い
@@ -84,14 +92,24 @@ function replyMessage_(replyToken, messages) {
   if (!replyToken) return null;
   if (__usedReplyTokens[replyToken]) {
     logWarn_('line.reply_token_reused', {});
+    traceStage_('LINE 返信 API（同じ応答トークン）', OPLOG.RESULT.IGNORED, CAUSE.REPLY_TOKEN_REUSED);
     return null;
   }
   __usedReplyTokens[replyToken] = true;
-  var res = lineFetch_('post', '/v2/bot/message/reply', {
-    replyToken: replyToken,
-    messages: normalizeMessages_(messages)
-  });
+  var res;
+  try {
+    res = lineFetch_('post', '/v2/bot/message/reply', {
+      replyToken: replyToken,
+      messages: normalizeMessages_(messages)
+    });
+  } catch (e) {
+    // 失敗の記録（LINE操作ログ）。エラーログへの記録は呼び出し元（processLineEvents_ 等）が原因コード付きで行う
+    traceReply_(false, lineApiCause_(e) || CAUSE.LINE_API_HTTP);
+    throw e;
+  }
+  // lineFetch_ は 2xx の場合だけ戻る＝LINE が応答を受理した。利用者の端末に表示されたこと（既読・到達）までは確認できない
   __replySent = true;
+  traceReply_(true, '');
   return res;
 }
 

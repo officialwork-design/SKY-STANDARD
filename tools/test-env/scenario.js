@@ -148,9 +148,14 @@ function runScenario() {
     ['運営に通知（メール）', () => e.mails.length >= 1]]);
 
   section = '5. 有人対応中は自動返信しない';
-  send('「こんにちは」を送信', say('こんにちは'), [['返信しない', silent]]);
+  const opRows = () => (e.sheets['LINE操作ログ'] ? e.sheets['LINE操作ログ'].data.slice(1) : []);
+  const errLevel = (lv, cause) => (e.sheets['エラーログ'] ? e.rows('エラーログ') : []).filter((x) => x['重要度'] === lv && x['原因コード'] === cause);
+  send('「こんにちは」を送信', say('こんにちは'), [['返信しない', silent],
+    ['LINE操作ログに「設定により停止（AUTO_REPLY_DISABLED）」', () => opRows().slice(-1)[0][4] === '設定により停止' && opRows().slice(-1)[0][5] === 'AUTO_REPLY_DISABLED'],
+    ['エラーログに CONFIG_WARNING（ERROR ではない）', () => errLevel('CONFIG_WARNING', 'AUTO_REPLY_DISABLED').length === 1]]);
   send('「FAQ」を送信', say('FAQ'), [['返信しない', silent]]);
-  send('「予約確認」をタップ', tap('a=rsv_start'), [['返信しない', silent]]);
+  send('「予約確認」をタップ', tap('a=rsv_start'), [['返信しない', silent],
+    ['CONFIG_WARNING は同じ顧客・受付IDにつき1件（重複して記録しない）', () => errLevel('CONFIG_WARNING', 'AUTO_REPLY_DISABLED').length === 1]]);
   send('「よくある質問」をタップ', tap('a=menu_unset&item=FAQ'), [['返信しない', silent]]);
   const n1 = inq().length;
   send('LINE が見積メッセージを再送（同じイベントID）', Object.assign({}, charterEvt, { replyToken: tok(), deliveryContext: { isRedelivery: true } }),
@@ -178,7 +183,8 @@ function runScenario() {
 
   const allErrors = e.sheets['エラーログ'] ? e.rows('エラーログ') : [];
   // 予約ID重複の記録は想定どおり（3. の確認項目）。それ以外のエラーを数える
-  const errors = allErrors.filter((x) => !/同じ予約IDの行が/.test(JSON.stringify(x)));
+  // 予約ID重複の記録（3.）と自動返信停止の設定警告（5.）は想定どおり。それ以外のエラーを数える
+  const errors = allErrors.filter((x) => !/同じ予約IDの行が/.test(JSON.stringify(x)) && x['重要度'] !== 'CONFIG_WARNING');
   return { steps, errors, pushes: e.linePosts('/v2/bot/message/push').length };
 }
 

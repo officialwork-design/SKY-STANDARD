@@ -241,6 +241,16 @@ function handleOperatorModeEvent_(ev, userId) {
     }
   }
   logInfo_('operator.auto_reply_suppressed', { type: ev.type, id: st.id, userId: userId, verified: isVerifiedEvent_() });
+  // 設定（自動返信有効=FALSE）による意図的な停止。障害ではないため CONFIG_WARNING として記録する
+  // （LINE操作ログには毎回、エラーログには同じ顧客・同じ受付IDにつき6時間に1件）
+  traceStage_('自動返信の停止中（自動返信有効=FALSE）', OPLOG.RESULT.STOPPED, CAUSE.AUTO_REPLY_DISABLED);
+  if (ev.type === 'message' || ev.type === 'postback') {
+    logIncident_(LOG_LEVEL.CONFIG_WARNING, 'operator.auto_reply_suppressed',
+      '「問い合わせ管理」の自動返信有効が FALSE のため、この顧客には自動返信していません' + (st.id ? '（判定行の受付ID ' + st.id + '）' : '') +
+      '。有人対応が終わったら、その行の自動返信有効を TRUE に戻してください。',
+      { cause: CAUSE.AUTO_REPLY_DISABLED, settingKeys: ['問い合わせ管理:' + OPERATOR.COL], result: '設定により停止',
+        dedupKey: hashForLog_(userId) + '|' + String(st.id || ''), detail: { id: st.id || '' }, functionName: 'handleOperatorModeEvent_' });
+  }
 }
 
 /* ---------- 共通：問い合わせの受付と有人対応への引き継ぎ ---------- */
@@ -268,6 +278,7 @@ function handoffToOperator_(ev, userId, o) {
     replyMessage_(ev.replyToken, inquiryReceivedText_(id, o.ack));
     return id;
   }
+  traceStage_('問い合わせの受付（' + String(o.category || '').substring(0, 20) + '）', OPLOG.RESULT.STARTED, '');
   var text = inquiryReceivedText_(id, o.ack);
   var replyError = null;
   try {
@@ -300,7 +311,8 @@ function handoffToOperator_(ev, userId, o) {
     });
   } catch (e) {
     saved = false;
-    logError_('operator.save_failed', e, { id: id });
+    logError_('operator.save_failed', e, { id: id }, { cause: CAUSE.INQUIRY_FAILED, result: '保存失敗（受付は返信済み）' });
+    traceStage_('問い合わせ管理への保存', OPLOG.RESULT.ERROR, CAUSE.INQUIRY_FAILED);
   }
   if (already) return id;
   // 保存に失敗しても停止は記録する（利用者には受付完了を返信済みのため）。
@@ -311,7 +323,9 @@ function handoffToOperator_(ev, userId, o) {
   var sent = notifyInquiry_(id, { label: o.category, important: !!o.important },
     o.content + (saved ? '' : '\n\n【要対応】問い合わせ管理への保存に失敗しました。手動で行を追加するか、管理メニューから自動返信を再開してください。'));
   if (!sent) {
-    logError_('operator.notify_failed', new Error('問い合わせを運営に通知できませんでした（ADMIN_NOTIFY_TARGET / ADMIN_EMAIL を確認）'), { id: id });
+    logError_('operator.notify_failed', new Error('問い合わせを運営に通知できませんでした（ADMIN_NOTIFY_TARGET / ADMIN_EMAIL を確認）'), { id: id },
+      { cause: CAUSE.NOTIFY_FAILED, settingKeys: ['ADMIN_NOTIFY_TARGET', 'ADMIN_EMAIL'], result: '通知なし（受付・保存は完了）' });
+    traceStage_('運営への通知', OPLOG.RESULT.ERROR, CAUSE.NOTIFY_FAILED);
   }
   if (replyError) {
     // 署名検証済みイベントで応答に失敗した場合はプッシュで知らせる（受付済みのため再処理させない）

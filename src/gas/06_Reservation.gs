@@ -310,6 +310,7 @@ function normalizeReservationId_(s) {
 /** 予約確認を始める（リッチメニュー「予約確認」・「予約確認」と送信・旧メニュー） */
 function startReservationCheck_(ev, userId) {
   if (!isOneToOne_(ev)) return replyMessage_(ev.replyToken, MSG_ONE_TO_ONE_ONLY);
+  traceStage_('予約確認の開始（予約IDの入力案内）', OPLOG.RESULT.STARTED, '');
   var res = replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.ASK_ID, [postbackAction_('入力をやめる', 'a=rsv_cancel', '入力をやめる')]));
   if (userId && (__replySent || isVerifiedEvent_())) setReservationState_(userId, { step: 'id', n: 0 });
   return res;
@@ -376,6 +377,7 @@ function handleReservationInput_(ev, userId, text) {
   if (reservationCheckMode_() === 'OFF') {
     // 本人確認方式が未設定：予約は検索せず（存在の有無も答えず）、予約IDを添えてオペレーターへ案内
     logInfo_('reservation_check.disabled', { userId: userId });
+    noteReservationCheckOff_();
     var r0d = replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.DISABLED, operatorQuickReply_(rid)));
     commit(function () { clearReservationState_(userId); });
     return r0d;
@@ -384,8 +386,9 @@ function handleReservationInput_(ev, userId, text) {
   try {
     own = findOwnReservation_(userId, rid);
   } catch (e) {
-    if (e instanceof ConfigError) logError_('config.missing', e, { missing: e.missingKeys });
-    else logError_('reservation_check.lookup_failed', e, {});
+    traceStage_('予約の検索', OPLOG.RESULT.ERROR, e instanceof ConfigError ? CAUSE.CONFIG_MISSING : CAUSE.RESERVATION_FAILED);
+    if (e instanceof ConfigError) logError_('config.missing', e, { missing: e.missingKeys }, { cause: CAUSE.CONFIG_MISSING, result: '予約確認を中止' });
+    else logError_('reservation_check.lookup_failed', e, {}, { cause: CAUSE.RESERVATION_FAILED, result: '予約確認を中止' });
     var r4 = replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.API_ERROR, operatorQuickReply_(rid)));
     commit(function () { clearReservationState_(userId); });
     return r4;
@@ -455,7 +458,8 @@ function findOwnReservationInSheet_(userId, rid) {
   if (!hits.length) return null;
   if (hits.length > 1) {
     logError_('reservation_check.duplicate_id', new Error('「予約管理」シートに同じ予約IDの行が ' + hits.length + ' 行あります（表示を止めました）'),
-      { rows: hits.map(function (h) { return h.__row; }).join(',') });
+      { rows: hits.map(function (h) { return h.__row; }).join(',') }, { cause: CAUSE.RESERVATION_DUPLICATE_ID, result: '表示を停止' });
+    traceStage_('予約の検索（予約ID重複）', OPLOG.RESULT.ERROR, CAUSE.RESERVATION_DUPLICATE_ID);
     return null;
   }
   var row = hits[0];
@@ -522,6 +526,7 @@ function reservationClosed_(r) {
 function handleReservationAction_(ev, userId, kind, ridRaw) {
   var rid = normalizeReservationId_(ridRaw);
   if (reservationCheckMode_() === 'OFF') {
+    noteReservationCheckOff_();
     return replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.DISABLED, operatorQuickReply_(rid)));
   }
   var r = null;
@@ -566,4 +571,20 @@ function handleReservationAction_(ev, userId, kind, ridRaw) {
     return replyMessage_(ev.replyToken, m2);
   }
   return replyMessage_(ev.replyToken, withQuickReply_(policy.join('\n') + '\n\n' + RSV_TEXT.CANCEL_BY_STAFF, op));
+}
+
+/**
+ * 本人確認方式が OFF のため予約内容を表示しなかったことを記録する。
+ * OFF（空欄）は現在の正常な運用設定なので、LINE操作ログに「設定により停止」として残すだけにする。
+ * ただし ID管理 に TRUE/FALSE や綴り違いなど不正な値が入っている場合は、設定警告（CONFIG_WARNING）をエラーログにも残す。
+ */
+function noteReservationCheckOff_() {
+  traceStage_('予約確認：予約内容の表示（RESERVATION_CHECK_MODE=OFF）', OPLOG.RESULT.STOPPED, CAUSE.RESERVATION_CHECK_OFF);
+  var raw = '';
+  try { raw = String(getIdRaw_(ID_KEYS.RESERVATION_CHECK_MODE) || '').trim(); } catch (e) { raw = ''; }
+  if (raw && !ID_KEYS.RESERVATION_CHECK_MODE.pattern.test(raw)) {
+    logIncident_(LOG_LEVEL.CONFIG_WARNING, 'config.reservation_check_mode_invalid',
+      'ID管理 RESERVATION_CHECK_MODE の値が正しくないため、予約内容を表示しない設定（OFF）として動作しています。値は LINE_LINKED または OFF（空欄）にしてください。',
+      { cause: CAUSE.CONFIG_INVALID, settingKeys: ['RESERVATION_CHECK_MODE'], result: '設定により停止', functionName: 'handleReservationInput_' });
+  }
 }

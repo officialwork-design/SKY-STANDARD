@@ -81,6 +81,7 @@ function replyThenSetInquiryState_(ev, userId, message, state) {
 /** 種別を選んだとき（postback a=inq_cat&c=N） */
 function startInquiry_(ev, userId, categoryKey) {
   var k = String(categoryKey || '');
+  traceStage_('問い合わせ項目：' + (INQUIRY_CATEGORIES[k] ? INQUIRY_CATEGORIES[k].label : 'c=' + k.replace(/[^0-9A-Za-z]/g, '').substring(0, 4)), OPLOG.RESULT.STARTED, '');
   if (k === '2') return startReservationCheck_(ev, userId); // 旧メニュー：予約内容の確認・変更
   if (k === '1' || k === '3') {
     // 案内だけで入力は受けないため、前の入力待ちは中断する（旧メニュー：天候・運航 → FAQ）

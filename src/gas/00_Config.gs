@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-11-06.1-rsv-sheet',
+  BUILD: '2026-11-06.2-monitoring',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',
@@ -163,6 +163,40 @@ var DEFAULT_WELCOME_MESSAGE =
   '🚁 SKY STANDARD公式LINEへようこそ。\n' +
   'ご登録いただき、誠にありがとうございます。\n\n' +
   '空の旅に関するご相談は、画面下のメニューよりお気軽にお申し付けくださいませ。✨';
+
+/**
+ * ログレベル（エラーログ「重要度」・LINE操作ログで使う）。
+ *   CONFIG_WARNING … 設定による意図的な停止（自動返信有効=FALSE など）。障害（ERROR）とは区別する
+ */
+var LOG_LEVEL = { INFO: 'INFO', WARNING: 'WARNING', CONFIG_WARNING: 'CONFIG_WARNING', ERROR: 'ERROR', FATAL: 'FATAL' };
+
+/**
+ * 原因コード（エラーログ・LINE操作ログの「原因コード」）。機能別・原因別に絞り込めるよう固定の値を使う。
+ */
+var CAUSE = {
+  LINE_API_400: 'LINE_API_400',
+  LINE_API_INVALID_REPLY_TOKEN: 'LINE_API_400_INVALID_REPLY_TOKEN',
+  LINE_API_401: 'LINE_API_401',
+  LINE_API_403: 'LINE_API_403',
+  LINE_API_404: 'LINE_API_404',
+  LINE_API_429: 'LINE_API_429',
+  LINE_API_5XX: 'LINE_API_5XX',
+  LINE_API_HTTP: 'LINE_API_HTTP_ERROR',
+  LINE_API_NETWORK: 'LINE_API_NETWORK',
+  WEBHOOK_EXCEPTION: 'WEBHOOK_EXCEPTION',
+  CONFIG_MISSING: 'CONFIG_MISSING',
+  CONFIG_INVALID: 'CONFIG_INVALID',
+  AUTO_REPLY_DISABLED: 'AUTO_REPLY_DISABLED',
+  RESERVATION_CHECK_OFF: 'RESERVATION_CHECK_OFF',
+  RESERVATION_FAILED: 'RESERVATION_FAILED',
+  RESERVATION_DUPLICATE_ID: 'RESERVATION_DUPLICATE_ID',
+  INQUIRY_FAILED: 'INQUIRY_FAILED',
+  UNSUPPORTED_POSTBACK: 'UNSUPPORTED_POSTBACK',
+  NO_REPLY: 'NO_REPLY',
+  REPLY_TOKEN_REUSED: 'REPLY_TOKEN_REUSED',
+  NOTIFY_FAILED: 'NOTIFY_FAILED',
+  INTERNAL_ERROR: 'INTERNAL_ERROR'
+};
 
 /** 設定エラー（未設定時に安全停止させるための専用例外） */
 function ConfigError(message, missingKeys) {
