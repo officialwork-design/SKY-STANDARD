@@ -62,6 +62,8 @@ function env(o = {}) {
     }
   });
   if (o.api) e.setSetting('RESERVATION_API_BASE_URL', API);
+  // 本人確認方式（既定は OFF＝表示しない）。テストでは LINE アカウント紐づけ照合を有効にする
+  if (o.mode !== 'OFF') e.setSetting('RESERVATION_CHECK_MODE', o.mode || 'LINE_LINKED');
   e.state = state;
   return e;
 }
@@ -105,7 +107,7 @@ test('LINEアカウントに紐づく予約（予約管理シート）は、予�
   post(e, postback('a=rsv_start'));
   post(e, text('ｓｋｙ－２０２６１２０１－ａ１ｂ２ｃ３')); // 全角・小文字でも受け付ける
   const m = last(e)[0];
-  assert.equal(m.text, '🔖 ご予約内容\n予約ID：SKY-20261201-A1B2C3\nプラン：東京夜景フライト\n📅 搭乗予定日：2026-12-01\n時間帯：18:00\n人数：2名\n予約状況：予約確定\n\nご希望のお手続きを下記よりお選びくださいませ。');
+  assert.equal(m.text, '🔖 ご予約内容\n予約ID：SKY-20261201-A1B2C3\n📅 予約日：2026-12-01\n予約時間：18:00\nプラン名：東京夜景フライト\n人数：2名\n予約ステータス：予約確定\n\nご希望のお手続きを下記よりお選びくださいませ。');
   assert.doesNotMatch(m.text, /99000|決済|LINEユーザーID|U[0-9a-f]{32}/, '金額・決済・ID は表示しない');
   assert.deepEqual(qr(m).map((a) => [a.label, a.data]), [['予約変更', 'a=rsv_change&rid=' + RID], ['キャンセル', 'a=rsv_cancel_req&rid=' + RID],
     ['オペレーターに相談', 'a=inq_operator&rid=' + RID]]);
@@ -115,7 +117,7 @@ test('LINEアカウントに紐づく予約（予約管理シート）は、予�
 test('予約サイト API：紐づく予約はコース名・予約状況（statusLabel）を表示。API キーは Authorization ヘッダーのみ', () => {
   const e = env({ api: true, linked: { [RID]: USER } });
   post(e, [postback('a=rsv_start'), text(RID)]);
-  assert.match(lastText(e), /コース：15分コース\n📅 搭乗予定日：2026-12-01\n時間帯：18:00\n人数：2名\n予約状況：予約確定/);
+  assert.match(lastText(e), /📅 予約日：2026-12-01\n予約時間：18:00\nプラン名：東京夜景フライト\nコース：15分コース\n人数：2名\n予約ステータス：予約確定/);
   const call = e.state.apiCalls[0];
   assert.equal(call.url, API + '/line/reservations?lineUserId=' + USER);
   assert.equal(call.auth, 'Bearer api-key-SECRET');
@@ -159,13 +161,13 @@ test('予約サイト API：未紐づけの予約は電話番号・メールで�
   assert.doesNotMatch(lastText(e), /東京夜景/, '予約IDだけでは表示しない');
   assert.deepEqual(JSON.parse(e.cache.get('rsv:' + USER)), { step: 'contact', rid: RID });
   post(e, text('090-1234-5678'));
-  assert.match(lastText(e), /プラン：東京夜景フライト/);
+  assert.match(lastText(e), /プラン名：東京夜景フライト/);
   const link = e.state.apiCalls.find((c) => /\/line\/link$/.test(c.url));
   assert.deepEqual(link.body, { lineUserId: USER, reservationId: RID, contact: '09012345678' });
   assert.ok(!e.logs.some((l) => /09012345678|090-1234-5678/.test(l)), '電話番号をログに出さない');
   // 次回からは紐づけ済みのため追加確認なしで表示
   post(e, [postback('a=rsv_start'), text(RID)]);
-  assert.match(lastText(e), /プラン：東京夜景フライト/);
+  assert.match(lastText(e), /プラン名：東京夜景フライト/);
 });
 
 test('本人確認に失敗したら予約情報を表示しない。照合は1回ごとに予約IDの入力からやり直し、回数制限あり', () => {
@@ -340,5 +342,99 @@ test('本人確認：+81 の電話番号は国内表記にそろえ、確認後�
   post(e, [postback('a=rsv_start'), text(RID), text('+81 90-1234-5678')]);
   const link = e.state.apiCalls.find((c) => /\/line\/link$/.test(c.url));
   assert.equal(link.body.contact, '09012345678');
-  assert.match(lastText(e), /コース：15分コース[\s\S]*予約状況：予約確定/);
+  assert.match(lastText(e), /コース：15分コース[\s\S]*予約ステータス：予約確定/);
+});
+
+/* ---------- 2026-11-06：本人確認方式・シート連携の追加確認 ---------- */
+
+const errorRows = (e) => (e.sheets['エラーログ'] ? e.rows('エラーログ') : []);
+
+test('本人確認方式が未設定（既定 OFF）なら、本人の予約でも内容を表示せずオペレーターへ案内（予約IDは添える）', () => {
+  for (const mode of ['OFF', 'off', 'invalid']) {
+    const e = mode === 'OFF' ? env({ mode: 'OFF' }) : env({ mode });
+    sheetResv(e, USER);
+    post(e, postback('a=rsv_start'));
+    post(e, text(RID));
+    const m = last(e)[0];
+    assert.doesNotMatch(m.text, /東京夜景フライト|予約ステータス|2026-12-01/, mode);
+    assert.match(m.text, /準備中/);
+    assert.deepEqual(qr(m).map((a) => a.data), ['a=inq_operator&rid=' + RID]);
+    assert.equal(e.cache.get('rsv:' + USER) || null, null);
+    // 予約変更・キャンセルの postback でも表示しない
+    post(e, postback('a=rsv_change&rid=' + RID));
+    assert.match(lastText(e), /準備中/);
+    post(e, postback('a=rsv_cancel_req&rid=' + RID));
+    assert.match(lastText(e), /準備中/);
+  }
+  // 設定確認で「未設定」と表示する
+  const e2 = env({ mode: 'OFF' });
+  assert.ok(JSON.stringify(e2.ctx.checkConfig_().missing).includes('RESERVATION_CHECK_MODE'));
+});
+
+test('予約IDが重複している（同じ予約IDの行が複数）場合は、どの行も表示せずエラーログに記録', () => {
+  const e = env();
+  sheetResv(e, USER, '予約確定');
+  sheetResv(e, USER, 'キャンセル');
+  post(e, postback('a=rsv_start'));
+  post(e, text(RID));
+  assert.doesNotMatch(lastText(e), /東京夜景フライト|予約ステータス/);
+  assert.match(lastText(e), /確認できませんでした/);
+  assert.ok(errorRows(e).some((r) => /同じ予約IDの行が 2 行/.test(JSON.stringify(r))));
+  // 別の LINE アカウントの行と重複していても表示しない
+  const e2 = env();
+  sheetResv(e2, USER);
+  sheetResv(e2, OTHER);
+  post(e2, postback('a=rsv_start'));
+  post(e2, text(RID));
+  assert.doesNotMatch(lastText(e2), /東京夜景フライト/);
+});
+
+test('予約管理の LINEユーザーID が空欄の予約は表示しない（予約IDだけでは開示しない）', () => {
+  const e = env();
+  sheetResv(e, '');
+  post(e, postback('a=rsv_start'));
+  post(e, text(RID));
+  assert.doesNotMatch(lastText(e), /東京夜景フライト/);
+  assert.match(lastText(e), /確認できませんでした/);
+});
+
+test('予約管理シートがない・必要な列がない場合は「確認できません」と案内し、エラーログに記録（予約情報は出さない）', () => {
+  const e = env();
+  delete e.sheets['予約管理'];
+  post(e, postback('a=rsv_start'));
+  post(e, text(RID));
+  assert.match(lastText(e), /ただいまご予約情報を確認できません/);
+  assert.ok(errorRows(e).length >= 1);
+  const e2 = env();
+  e2.sheets['予約管理'].data[0] = ['予約ID', 'プラン名'];
+  e2.sheets['予約管理'].data.push([RID, '東京夜景フライト']);
+  post(e2, postback('a=rsv_start'));
+  post(e2, text(RID));
+  assert.match(lastText(e2), /ただいまご予約情報を確認できません/);
+  assert.ok(errorRows(e2).some((r) => /LINEユーザーID/.test(JSON.stringify(r))), '不足列をエラーログに記録');
+});
+
+test('同じ応答トークンには2回返信しない', () => {
+  const e = env();
+  const t = tok();
+  e.ctx.replyMessage_(t, 'a');
+  e.ctx.replyMessage_(t, 'b');
+  assert.equal(e.linePosts('/v2/bot/message/reply').filter((c) => c.json.replyToken === t).length, 1);
+});
+
+test('問い合わせの入力待ちと予約確認の入力待ちは混在しない（後から開始した方だけ有効）', () => {
+  const e = env();
+  sheetResv(e, USER);
+  post(e, postback('a=inq_cat&c=5')); // その他のお問い合わせ（入力待ち）
+  post(e, postback('a=rsv_start'));   // 予約確認に切り替え
+  assert.equal(e.cache.get('inq:' + USER) || null, null);
+  post(e, text(RID));
+  assert.match(lastText(e), /予約ID：SKY-20261201-A1B2C3/);
+  assert.equal(e.rows('問い合わせ管理').length, 0, '予約IDを問い合わせとして受け付けない');
+  post(e, postback('a=rsv_start'));
+  post(e, postback('a=inq_cat&c=5')); // 問い合わせに切り替え
+  assert.equal(e.cache.get('rsv:' + USER) || null, null);
+  post(e, text(RID));
+  assert.equal(e.rows('問い合わせ管理').length, 1, '問い合わせとして受付');
+  assert.doesNotMatch(lastText(e), /予約ステータス/);
 });

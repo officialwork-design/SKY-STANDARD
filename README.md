@@ -4,106 +4,150 @@
 
 **標準構成は「LINE公式アカウント → Google Apps Script → Googleスプレッドシート」です。** Cloud Run・Firebase・外部の有料サーバーは使いません。ただし GAS 単体では、LINE の署名（`X-Line-Signature`）を検証できません。この制約と対策は[9章](#9-line-署名検証ができないことによる制約)に記載しています。
 
-## 0. 公式LINEの構成とフロー（2026-10-30 改修）
+## 0. 公式LINEの構成とフロー（2026-11-06 更新）
 
-LINE公式アカウント（`@686mdyho`）は、リッチメニュー4領域で次のように動きます。詳細は [docs/line-flows.md](docs/line-flows.md)。
+LINE公式アカウント（`@686mdyho`）のリッチメニュー（4領域）と、各ボタンから始まる処理です。詳細は [docs/line-flows.md](docs/line-flows.md)。
 
-| 領域 | 表示 | 動作 |
+> **現在はテスト環境です。** 予約サイトは未公開で、「ご予約はこちら」「よくある質問」のリンク先はテストサイト（デモ用。実際の販売・予約は行っていない）です。
+
+### LINE リッチメニューの構成
+
+登録済み：`richmenu-b7381e62ad819d8d7adb1bde3b55afe9`（2026-10-30 登録）／画像 `SKY_STANDARD_LINE_2500x1686.jpg`（ドライブ ID `140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA`、2500×1686）
+
+| 領域 | 表示 | タップ領域（px） | 動作 |
+|---|---|---|---|
+| 上部全面 | ご予約はこちら | x 0〜2499 / y 0〜884 | `BOOKING_SITE_URL` を開く。未設定の間は postback `a=menu_unset&item=BOOKING` で「準備中」 |
+| 左下 | 予約確認 | x 0〜832 / y 885〜1685 | postback `a=rsv_start`（LINE トークで予約IDの入力を開始） |
+| 中央下 | お問い合わせ | x 833〜1665 / y 885〜1685 | postback `a=inq_start`（4項目のメニュー） |
+| 右下 | よくある質問 | x 1666〜2499 / y 885〜1685 | `FAQ_PAGE_URL` を開く。未設定の間は postback `a=menu_unset&item=FAQ` で「準備中」 |
+
+- 座標は `src/gas/08_RichMenu.gs` の `RICHMENU_SIZE`（2500×1686）と `RICHMENU_GRID`（y=885、x=833／1666）。画像の区切り線の実測（y≈885〜887、x≈833〜835／1666〜1668）と、登録済みメニューに合わせています。画像を変えたら、この2つを更新してテストを実行します。
+- LINE 上のメニューは「リッチメニュー登録・更新」を実行するまで変わりません。登録時、それまでの既定メニューは**削除せずに残し**、ID をスクリプトプロパティ `PREVIOUS_RICHMENU_ID` に記録します（切り戻し用）。
+
+### テストサイト URL の設定方法（`BOOKING_SITE_URL`・`FAQ_PAGE_URL`）
+
+URL は設定値として「ID管理」シートで管理します（コードに書きません）。
+
+| 設定キー | 用途 | 現在（テスト）の値 |
 |---|---|---|
-| 上部全面 | ご予約はこちら ❯❯❯❯ | 公式サイトを開く（`BOOKING_SITE_URL`。未設定の間は「準備中」） |
-| 左下 | 予約確認 | LINE トークで予約IDの入力を開始 → 本人確認 → 予約内容＋［予約変更］［キャンセル］［オペレーターに相談］ |
-| 中央下 | お問い合わせ | ［チャーター見積］［フライト予約について］［その他のお問い合わせ］［オペレーターに相談］ |
-| 右下 | よくある質問 | 公式サイトの FAQ ページを開く（`FAQ_PAGE_URL`。未設定の間は「準備中」） |
+| `BOOKING_SITE_URL` | ご予約はこちら | `https://sky-standard-test-677788669305.asia-northeast1.run.app/` |
+| `FAQ_PAGE_URL` | よくある質問 | 同上（FAQ 専用ページができたら、この値だけ書き換える） |
+
+1. 「ID管理」の B列（設定値）に URL を入力（https のみ。http・不正な値は未設定として扱い「準備中」のまま）。
+2. 管理メニュー「ID管理の変更を反映」。
+3. 「リッチメニュー設定確認」（LINE には登録しない）で、ご予約はこちら・よくある質問が「リンク」、【要再登録】と表示されることを確認。
+4. 承認後に「リッチメニュー登録・更新」。タップ座標・画像は変わりません。
+
+- URL を入力した時点で、トークの「FAQ」「予約」などの文字入力や、再登録前の準備中ボタンにはリンクで返信するようになります（URL の入力も本番反映として扱ってください）。
+- 本番用とテスト用の値の区別：本番シート（管理台帳）とテスト環境のシート（`docs/test-env.md`）は別々の「ID管理」を持ちます。テスト環境の `testSetup` はテスト用シートにだけテストサイトの URL を入れます。予約サイトの本番公開時は、本番シートの2つの URL を本番の URL に書き換えて再登録します。
+
+### 予約確認の処理フロー
 
 ```text
-ご予約はこちら ─▶ 公式サイト（地域 → プラン → コース → 日時・人数・搭乗者 → 予約申請 → 運航確認 → 決済 → 確定）
-予約確認 ───────▶ 予約ID入力 ─▶ LINEアカウントに紐づく予約？ ─はい─▶ 予約内容＋3ボタン
-                                          └いいえ─▶ 電話番号/メールで本人確認（予約サイト API）─一致─▶ 表示
-                                                                                   └不一致─▶ 表示しない
-お問い合わせ ───▶ チャーター見積／その他／オペレーターに相談 ─▶ 内容を受信 ─▶ 共通の有人引き継ぎ
-                 フライト予約について ─▶ 公式サイトを案内（必要ならオペレーターに相談）
-共通の有人引き継ぎ ─▶ 受付ID発行 → シート保存（未対応・自動返信有効=FALSE）→ 受付完了を1回返信 → 自動返信停止
-                    → 担当者が LINE のチャットで返信 → 完了したら自動返信有効を TRUE（次のメッセージから再開）
-よくある質問 ───▶ 公式サイトの FAQ ページ
+［予約確認］をタップ（postback a=rsv_start、1対1トークのみ）
+  └▶ 予約IDの入力案内（入力待ち 10分。［入力をやめる］／メニュー操作で中断）
+      └▶ 予約IDを送信
+          ├ 形式が違う（SKY-YYYYMMDD-XXXXXX 以外）→ 再入力（3回で終了・オペレーター導線）
+          ├ 本人確認方式が未設定（RESERVATION_CHECK_MODE が空欄・OFF＝既定）
+          │    → 検索せず「表示は準備中」＋［オペレーターに相談］（予約IDを添える）
+          └ RESERVATION_CHECK_MODE=LINE_LINKED
+               → 「予約管理」シートを予約IDで検索
+                  ├ 1行だけ一致 かつ LINEユーザーID＝問い合わせた LINE アカウント → 予約内容を返信（＋予約変更・キャンセル・オペレーター）
+                  ├ 該当なし／他人の予約／LINEユーザーID が空欄 → 同じ文面で「確認できませんでした」＋オペレーター（存在の有無を答えない）
+                  ├ 同じ予約IDの行が複数 → 表示しない（同上の案内）＋エラーログに記録
+                  └ シートがない・必要な列がない・読み取り失敗 → 「ただいま確認できません」＋オペレーター＋エラーログ
 ```
 
-### 予約確認 API の連携
+返信する項目：予約ID／予約日（搭乗日）／予約時間（時間帯）／プラン名／人数／予約ステータス。氏名・電話番号・メール・金額・決済情報は表示しません。予約内容は応答（reply）でだけ送り、プッシュでは送りません。グループ・複数人トークでは予約確認を受け付けません。
 
-- 照会先：ID管理 `RESERVATION_API_BASE_URL` の予約サイト API（`GET /line/reservations?lineUserId=`、`POST /line/link`）。認証は `Authorization: Bearer RESERVATION_API_KEY`、キーは `RESERVATION_API_ALLOWED_HOST` のホストにだけ送ります。
-- 予約サイトにはまだこの API がありません。API がない間は「予約管理」シートで LINE ユーザーIDが紐づいた予約だけを表示し、それ以外はオペレーターへ案内します。
-- 予約IDだけでは表示しません。存在の有無も答えません。予約内容は応答（reply）でだけ送ります。
-- 予約の変更・取消は GAS では行いません。予約サイトの手続き画面（ある場合）か担当者へ案内します。
-- 仕様：[docs/reservation-api.md](docs/reservation-api.md)
+予約変更・キャンセルのボタンは GAS では予約を変更・取消しません（担当者・予約サイトの手続きへ案内）。
 
-### 問い合わせ受付と有人対応
+### 予約データのシート構成（連携先）
 
-すべての有人対応は `handoffToOperator_`（`src/gas/12_Operator.gs`）に統一しています。同じ Webhook イベントで受付IDを二重発行しません（「LINEイベントID」で照合）。有人対応中は、FAQ・予約ID入力・キーワードなどの自動返信が割り込みません。運営通知は既存の通知先を使います。
+連携先は既存の「公式LINE管理台帳」スプレッドシート（`1pzu1_…`）の「予約管理」シートです。新しいシートは作っていません。2026-11-06 時点でデータ行は 0 件です。
 
-対応状況：未対応／対応中／お客様回答待ち／見積・社内確認中／完了／キャンセル・取下げ（記録用。自動返信は「自動返信有効」で決まります）。
+| 列 | 必須 | 用途 |
+|---|---|---|
+| 予約ID | ○ | 照会キー（`SKY-YYYYMMDD-XXXXXX`。テストデータは `TEST-…`）。**1予約1行**（重複すると表示しない） |
+| LINEユーザーID | ○ | 本人確認（この LINE アカウントの予約か）。空欄の予約は表示しない |
+| プラン名 | ○ | 表示：プラン名 |
+| 搭乗日 | ○ | 表示：予約日（`yyyy-MM-dd`） |
+| 時間帯 | ○ | 表示：予約時間（`HH:mm`） |
+| 人数 | ○ | 表示：人数 |
+| 予約状態 | ○ | 表示：予約ステータス（`CONFIRMED` などは日本語に変換）。変更・キャンセル可否の判断にも使う |
+| プランID・金額・決済状態・予約サイト管理URL・最終更新・集合場所・注意事項・最終イベント日時 | － | 既存列（表示しない） |
 
-### スプレッドシート構成（変更点）
+必須列がない場合、予約確認は「確認できません」と案内し、エラーログに不足列を記録します（列の追加は「シート列・設定行の補完」）。行の追加は、予約サイトからの予約通知（`kind: reservation_event`、`RESERVATION_WEBHOOK_SECRET` による署名付き）または担当者の手入力です。**現在の予約サイトには、予約と LINE ユーザーIDを結びつける仕組みも、このシートへ送る仕組みもありません**（未実装事項）。
 
-| シート | 変更 |
+参照権限：スプレッドシートは編集者（運営）だけが開ける共有設定にしてください。GAS はデプロイしたユーザーの権限でシートを読み、予約IDだけで予約を返す公開 API はありません。
+
+### 本人確認方式
+
+| `RESERVATION_CHECK_MODE`（ID管理） | 動作 |
 |---|---|
-| 問い合わせ管理 | 末尾に「LINEイベントID」列を追加（重複受付の防止）。対応状況の選択肢を6種に。既存の行・値は変更しない |
-| ID管理 | `FAQ_PAGE_URL` 行を追加（空欄。公開後に入力） |
-| リッチメニュー | 登録時に「ご予約はこちら」行を追加し、実装状態を更新（旧メニューの行は残す） |
+| 空欄・`OFF`（既定） | 予約内容を表示しない。予約IDを添えてオペレーターへ案内 |
+| `LINE_LINKED` | 「予約管理」の LINEユーザーID と、問い合わせた LINE アカウントのユーザーID（LINE が発行し、利用者は変更できない）が一致する予約だけ表示 |
 
-列・行の追加は「シート列・設定行の補完」で行います（既存データは削除・上書きしません）。
+- 予約IDだけでは開示しません。LINEユーザーID は、予約時に LINE ログイン等で取得するか、担当者が本人と確認したうえで入力する前提です。この運用が決まるまで `OFF` のままにしてください。
+- 予約サイト API（`RESERVATION_API_BASE_URL`）を設定した場合は、未紐づけの予約を電話番号・メールで照合する追加確認も使えます（今回は対象外。仕様は [docs/reservation-api.md](docs/reservation-api.md)）。
+- Webhook は GAS 単体で受信するため署名を検証できません。予約内容は「LINE が受理した応答トークン」への返信でだけ送るため、偽装リクエストでは受け取れません（[9章](#9-line-署名検証ができないことによる制約)）。
 
-### 設定キー
+### 必要な GAS 設定
 
-- スクリプトプロパティ（秘密情報。値はここにだけ保存）：`LINE_CHANNEL_ACCESS_TOKEN`、`SPREADSHEET_ID`、`ADMIN_USERS`、`RESERVATION_WEBHOOK_SECRET`、`RESERVATION_API_KEY`、`RESERVATION_API_ALLOWED_HOST`、`ADMIN_EMAIL`（任意）、`WEBHOOK_MODE`（任意）。一覧は[4章](#4-スクリプトプロパティ一覧本体gas)。
-- ID管理（公開してよい値）：`BOOKING_SITE_URL`、`FAQ_PAGE_URL`、`RESERVATION_API_BASE_URL`、`RICHMENU_IMAGE_FILE_ID`、`ADMIN_NOTIFY_TARGET` など。未確認の URL は入力しません。
+| 種類 | キー | 内容 |
+|---|---|---|
+| スクリプトプロパティ（秘密情報） | `LINE_CHANNEL_ACCESS_TOKEN` | チャネルアクセストークン（ソース・シートには書かない） |
+| 〃 | `SPREADSHEET_ID`／`ADMIN_USERS`／`ADMIN_EMAIL`（任意） | 起動用シートID／管理者メール／運営通知メール |
+| 〃（自動） | `CURRENT_RICHMENU_ID`／`PREVIOUS_RICHMENU_ID` | 登録したメニュー／切り替え前のメニュー |
+| ID管理 | `BOOKING_SITE_URL`／`FAQ_PAGE_URL` | 上記 |
+| ID管理 | `RICHMENU_IMAGE_FILE_ID` | `140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA` |
+| ID管理 | `RESERVATION_CHECK_MODE` | 空欄（既定）／`LINE_LINKED` |
 
-### リッチメニュー画像の管理
+ID管理の新しいキー（`FAQ_PAGE_URL`・`RESERVATION_CHECK_MODE`）の行は、管理メニュー「シート列・設定行の補完」で空欄のまま追加されます（既存の行は変更しません）。
 
-- 画像は Google ドライブ「空と都市を巡るヘリチャーター案内.png」（ID `17JrCm0unhRnSG2En65jmVSl116Sq4ipf`、1543×1019）。ID管理 `RICHMENU_IMAGE_FILE_ID` にこの ID を入力します（2026-10-30 時点では旧画像の ID のまま）。
-- 2.2MB の PNG のため、登録時に GAS が JPEG に変換します（元画像は変更しません）。
-- テスト環境の `testMakeRichMenuImage` で、同じフォルダに 1MB 以下の JPEG（`空と都市を巡るヘリチャーター案内_LINE用.jpg`）を別名で作成できます。本番でもこの JPEG の ID を `RICHMENU_IMAGE_FILE_ID` に使えば、登録時の変換は不要です。
-- 画像のデザインを変えたら、`src/gas/08_RichMenu.gs` の `RICHMENU_SIZE` と `RICHMENU_GRID`（区切り線の位置）を合わせて更新し、テストを実行します。
+### 問い合わせ受付と有人対応（変更なし）
 
-### LINE リッチメニューの切替手順（本番。承認後に実施）
+［チャーター見積］［フライト予約について］［その他のお問い合わせ］［オペレーターに相談］。受付は `handoffToOperator_`（`src/gas/12_Operator.gs`）に統一し、同じ Webhook イベントで受付IDを二重発行しません。有人対応中（問い合わせ管理「自動返信有効」=FALSE）は、予約確認・FAQ・リッチメニューの案内を含むすべての自動返信が割り込みません。予約確認と問い合わせの入力待ちは同時に1つだけです（後から始めた方が有効）。
 
-1. 本体GASを反映（`clasp push` → 既存ウェブアプリを新バージョンで更新）。新コードは旧メニューのボタンにも応答するため、先に GAS を更新します。
-2. 管理メニュー「シート列・設定行の補完」。
-3. ID管理 `RICHMENU_IMAGE_FILE_ID` を新画像の ID に変更し、「ID管理の変更を反映」。
-4. 「リッチメニュー設定確認」（LINE には登録しない）で、画像（JPEG 変換後 1MB 以下・1543×1019）、4領域の座標、旧メニューとの差（2500×1686・6領域 → 1543×1019・4領域）を確認。
-5. 「リッチメニュー登録・更新」で切り替え（新メニュー作成 → 画像アップロード → 既定に設定 → 旧メニュー削除。途中で失敗したら作成したメニューを削除）。
-6. 実機で4領域をタップして確認。
-
-戻すとき：旧画像の ID に戻して「リッチメニュー登録・更新」を実行すると、旧サイズの画像はサイズ違いとして止まります。旧メニューに戻す場合は、GAS も旧バージョン（`@10`）に戻してから登録してください。
-
-### テスト
+### clasp push とデプロイ更新手順（承認後に実施）
 
 ```bash
-npm test                                   # すべてのモックテスト
-node --test tests/reservation-check.test.js # 予約確認フロー
-node --test tests/richmenu.test.js          # リッチメニュー（4領域・画像）
-node --test tests/operator.test.js          # お問い合わせ・有人対応
-npm run test-env:scenario                  # 実機確認と同じ操作をモックで通しで実行（結果を表示）
+cd "/Users/nandre/Users/SKY STANDARD LINE/SKY-STANDARD"
+npm test                                           # すべて成功することを確認
+clasp push                                         # 本体GAS（スクリプトID 1zlkPtaZ…ff）。管理メニュー（ライブラリ HEAD）には即時反映
+clasp deployments                                  # 既存ウェブアプリのデプロイID（AKfycbwNho2m…）を確認
+clasp deploy -i <既存のデプロイID> -d "予約確認シート連携"  # 既存ウェブアプリを新バージョンで更新。URL は変わらない
 ```
 
-テスト用 LINE チャネル・テスト用 GAS での実機確認は [docs/test-env.md](docs/test-env.md)（`npm run test-env:build` で一式を出力）。
+1. 管理メニュー「LINE接続チェック」で build `2026-11-06.1-rsv-sheet` を確認。
+2. 「シート列・設定行の補完」→ ID管理に `FAQ_PAGE_URL`・`RESERVATION_CHECK_MODE` の行が追加される。
+3. `BOOKING_SITE_URL`・`FAQ_PAGE_URL` を入力 →「ID管理の変更を反映」→「リッチメニュー設定確認」。
+4. 承認後に「リッチメニュー登録・更新」。
+5. `RESERVATION_CHECK_MODE` は本人確認の運用が決まるまで空欄のまま。
 
-### GAS のデプロイ手順
+### LINE 上でのテスト方法
+
+本番の公式アカウントで試験送信はしません。テスト用 LINE チャネルとテスト用 GAS・シートで確認します（[docs/test-env.md](docs/test-env.md)）。
 
 ```bash
-clasp push                                         # 本体GAS（スクリプトID 1zlkPtaZ…ff）
-clasp deploy -i <既存のデプロイID> -d "LINE フロー改修"  # 既存ウェブアプリ（現在 @10）を新バージョンで更新。URL は変わらない
+npm test                     # モックテスト（LINE・Google には接続しない）
+npm run test-env:scenario    # スマホでの確認と同じ操作をモックで通し実行（結果は docs/test-reports/）
+npm run test-env:build       # テスト用 GAS 一式（build/test-env/）
 ```
 
-反映後は「LINE接続チェック」で build `2026-10-30.1-flow-v2` を確認します。管理メニュー用GASの更新は不要です。
+テスト環境では `testSetup` がテストサイトの URL と `RESERVATION_CHECK_MODE=LINE_LINKED` をテスト用シートに設定し、`testSeedReservations` が架空の予約（本人・キャンセル済み・他人・予約ID重複）を登録します。
 
-### 障害発生時の復旧
+### トラブルシューティング
 
-| 症状 | 対処 |
+| 症状 | 確認・対処 |
 |---|---|
-| 新フローに不具合 | 既存ウェブアプリのデプロイを `@10` に戻す（LINE のメニューが新しい場合は、旧メニューの再登録も必要） |
-| 予約確認で「ただいま確認できません」 | 予約サイト API の障害・設定（`RESERVATION_API_BASE_URL` と `RESERVATION_API_ALLOWED_HOST` のホスト一致、API キー）。エラーログ `reservation_check.*` |
-| 予約確認で必ず「確認できませんでした」 | 予約サイト API 未設定の間は、予約管理シートで LINE ユーザーIDが紐づいた予約だけ表示されます |
-| リッチメニュー登録が止まる | 「リッチメニュー設定確認」の画像の【NG】（サイズ・1MB・ID） |
-| 特定のお客様に返信しない | 有人対応中（自動返信有効=FALSE）。「お問い合わせ → 自動返信の状況」 |
+| ボタンが「準備中」のまま | ID管理の URL（https のみ）→「ID管理の変更を反映」→「リッチメニュー登録・更新」（再登録するまで LINE 上のメニューは変わらない） |
+| 予約確認で必ず「表示は準備中」 | `RESERVATION_CHECK_MODE` が空欄・`OFF`（既定）。本人確認の運用を決めてから `LINE_LINKED` に |
+| 予約確認で必ず「確認できませんでした」 | 予約管理にその予約IDの行がない／LINEユーザーID が空欄・別のアカウント／同じ予約IDが複数行（エラーログ `reservation_check.duplicate_id`） |
+| 予約確認で「ただいま確認できません」 | 予約管理シート・必須列の不足（エラーログ `config.missing`）、読み取り失敗（`reservation_check.lookup_failed`）。予約サイト API 設定時は API の障害・設定 |
+| 有人対応中に返信がない | 想定どおり（自動返信有効=FALSE）。完了したら TRUE に戻す |
+| リッチメニュー登録で画像エラー | 画像が 2500×1686・1MB 以下（PNG は JPEG 変換後）か。ID管理 `RICHMENU_IMAGE_FILE_ID` |
+| 新しいコードに不具合 | 既存ウェブアプリを前のバージョン（flow-v2 のバージョン、または `@10`）に戻す。メニューは `PREVIOUS_RICHMENU_ID` のメニューを LINE で既定に戻す |
 
 ## 1. GAS単体構成の全体図
 
@@ -165,7 +209,7 @@ clasp deploy -i <既存のデプロイID> -d "LINE フロー改修"  # 既存ウ
 | `RELAY_SHARED_SECRET` | relay のみ | リレーと共有する HMAC 鍵（GAS単体では不要） |
 | `LINE_CHANNEL_SECRET` | 任意 | 参照用。GAS単体では署名検証に使えません |
 
-自動で保存されるプロパティ: `BOT_USER_ID`（宛先照合用）、`LAST_WEBHOOK_AT` / `LAST_WEBHOOK_EVENTS`（受信記録）、`PENDING_*`、`TRIGGER_*`、`LAST_RUN_*`、`CURRENT_RICHMENU_ID`、`OPERATOR_MODE:<LINEユーザーID>`（自動返信停止の内部記録。正本は「問い合わせ管理」の「自動返信有効」）。
+自動で保存されるプロパティ: `BOT_USER_ID`（宛先照合用）、`LAST_WEBHOOK_AT` / `LAST_WEBHOOK_EVENTS`（受信記録）、`PENDING_*`、`TRIGGER_*`、`LAST_RUN_*`、`CURRENT_RICHMENU_ID`・`PREVIOUS_RICHMENU_ID`（リッチメニュー）、`OPERATOR_MODE:<LINEユーザーID>`（自動返信停止の内部記録。正本は「問い合わせ管理」の「自動返信有効」）。
 
 廃止したプロパティ: `ALLOW_UNSIGNED_WEBHOOK`（`WEBHOOK_MODE` に置き換え）。残っている場合は「ID・URL設定チェック」で注意が表示されます。
 

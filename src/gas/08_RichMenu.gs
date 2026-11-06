@@ -2,7 +2,8 @@
  * 08_RichMenu.gs
  * リッチメニューの登録・更新・既定設定。
  *
- * レイアウト（2026-10-30〜）: 画像「空と都市を巡るヘリチャーター案内.png」1543 x 1019 / 4領域
+ * レイアウト（2026-10-30〜）: 画像「SKY_STANDARD_LINE_2500x1686.jpg」2500 x 1686 / 4領域
+ *   （LINE 登録済み：richmenu-b7381e62ad819d8d7adb1bde3b55afe9、2026-10-30 12:55）
  *   ┌──────────────────────────────────────┐
  *   │          ご予約はこちら ❯❯❯❯           │  ← 上部全面
  *   ├────────────┬────────────┬────────────┤
@@ -10,28 +11,31 @@
  *   └────────────┴────────────┴────────────┘
  *
  * ■ ボタンの動作
- *   - ご予約はこちら … 公式サイト（ID管理 BOOKING_SITE_URL）を開く。URL 未設定の間は postback で「準備中」を返信
+ *   - ご予約はこちら … 予約サイト（ID管理 BOOKING_SITE_URL）を開く。URL 未設定の間は postback で「準備中」を返信
+ *                      （2026-11 時点の値はテストサイト https://sky-standard-test-677788669305.asia-northeast1.run.app/）
  *   - 予約確認       … postback a=rsv_start（LINE トークで予約IDの入力を開始。06_Reservation.gs）
  *   - お問い合わせ   … postback a=inq_start（4項目のお問い合わせメニュー。05_Inquiry.gs）
- *   - よくある質問   … 公式サイトの FAQ（ID管理 FAQ_PAGE_URL）を開く。URL 未設定の間は postback で「準備中」を返信
+ *   - よくある質問   … FAQ ページ（ID管理 FAQ_PAGE_URL）を開く。URL 未設定の間は postback で「準備中」を返信
+ *                      （FAQ 専用ページができたら FAQ_PAGE_URL を書き換えて再登録するだけで切り替わる）
  *   URL は「ID管理」に入力して管理メニュー「リッチメニュー登録・更新」を実行すると反映される（ダミー URL は使わない）。
  *   旧メニュー（6領域）のボタン（menu_unset の PLANS・CHARTER など、メッセージ「お問い合わせ」「FAQ」）にも引き続き応答する。
  *
  * ■ 画像
- *   「ID管理」の RICHMENU_IMAGE_FILE_ID（Google ドライブのファイルID）。1543 x 1019 px、PNG / JPEG。
+ *   「ID管理」の RICHMENU_IMAGE_FILE_ID（Google ドライブのファイルID。2026-11 時点 140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA）。2500 x 1686 px、PNG / JPEG。
  *   LINE の上限 1MB を超える PNG は、登録時に GAS で JPEG に変換して使う（ドライブの元画像は変更しない）。
  */
 
 /** 画像サイズ（LINE のリッチメニューは画像と同じサイズで定義する。幅 800〜2500、幅/高さ 1.45 以上） */
-var RICHMENU_SIZE = { width: 1543, height: 1019 };
+var RICHMENU_SIZE = { width: 2500, height: 1686 };
 
 /**
- * タップ領域の区切り位置（px）。2026-10-30 にドライブの画像（ID 17JrCm0unhRnSG2En65jmVSl116Sq4ipf）を実測:
- *   上段と下段の間の白い区切り線 y=535〜536、下段の縦の区切り線 x=514〜516 / 1028〜1030
- *   → 区切り y=536、x=515 / 1029（各ボタンの絵柄は1つの領域に収まり、領域は重ならず全面を覆う）
+ * タップ領域の区切り位置（px）。登録済みメニュー（2026-10-30）と同じ値。
+ * 2026-11-06 にドライブの画像（ID 140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA）を実測：
+ *   上段と下段の間の白い区切り線 y≈885〜887、下段の縦の区切り線 x≈833〜835 / 1666〜1668
+ *   → 区切り y=885、x=833 / 1666（各ボタンの絵柄は1つの領域に収まり、領域は重ならず全面を覆う）
  * 画像のデザインを変えた場合は、区切り線の位置に合わせてこの値を更新する。
  */
-var RICHMENU_GRID = { topHeight: 536, xs: [0, 515, 1029, 1543] };
+var RICHMENU_GRID = { topHeight: 885, xs: [0, 833, 1666, 2500] };
 
 /** ボタン定義（上段 → 下段の左から右。name はシート「リッチメニュー」の表示名） */
 var RICHMENU_ITEMS = [
@@ -213,8 +217,10 @@ function validateRichMenuImage_() {
 /* ---------- 登録 ---------- */
 
 /**
- * リッチメニューを登録する：画像の検査 → 定義の検証 → 作成 → 画像アップロード → 既定に設定 → 旧メニュー削除。
+ * リッチメニューを登録する：画像の検査 → 定義の検証 → 作成 → 画像アップロード → 既定に設定。
  * 画像に問題があれば LINE には何も作らずに止める。管理メニューから実行する（Webhook からは実行できない）。
+ * それまでの既定メニューは削除しない（切り戻し用に残し、ID をスクリプトプロパティ PREVIOUS_RICHMENU_ID に記録する）。
+ * 不要になった旧メニューは、確認のうえ LINE Developers 等で個別に削除する。
  */
 function deployRichMenu_() {
   var img = validateRichMenuImage_();
@@ -236,13 +242,12 @@ function deployRichMenu_() {
     }
     throw e;
   }
-  if (oldDefault && oldDefault !== richMenuId) {
-    try { lineFetch_('delete', '/v2/bot/richmenu/' + oldDefault); } catch (e) { logWarn_('richmenu.delete_old_failed', {}); }
-  }
+  var props = PropertiesService.getScriptProperties();
+  if (oldDefault && oldDefault !== richMenuId) props.setProperty('PREVIOUS_RICHMENU_ID', oldDefault);
   updateRichMenuSheetStatus_(built);
-  PropertiesService.getScriptProperties().setProperty('CURRENT_RICHMENU_ID', richMenuId);
-  logInfo_('richmenu.deployed', { id: richMenuId, unset: built.unset.length });
-  return { richMenuId: richMenuId, unset: built.unset };
+  props.setProperty('CURRENT_RICHMENU_ID', richMenuId);
+  logInfo_('richmenu.deployed', { id: richMenuId, previous: oldDefault || '', unset: built.unset.length });
+  return { richMenuId: richMenuId, previousId: oldDefault && oldDefault !== richMenuId ? oldDefault : '', unset: built.unset };
 }
 
 /**

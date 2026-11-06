@@ -160,7 +160,7 @@ test('シート補完: SPREADSHEET_ID を起動用プロパティに保存し、
   assert.equal(JSON.stringify(e.sheets['FAQ'].data), faq);
   const idAfter = e.sheets['ID管理'].data;
   assert.equal(JSON.stringify(idAfter.slice(0, JSON.parse(id).length)), id, '既存の行は変更しない');
-  assert.deepEqual(idAfter.slice(JSON.parse(id).length).map((x) => x[0]), ['FAQ_PAGE_URL'], '新しいキー（FAQ_PAGE_URL）だけ空欄で追加');
+  assert.deepEqual(idAfter.slice(JSON.parse(id).length).map((x) => x[0]), ['FAQ_PAGE_URL', 'RESERVATION_CHECK_MODE'], '新しいキー（FAQ_PAGE_URL・RESERVATION_CHECK_MODE）だけ空欄で追加');
   assert.equal(idAfter[idAfter.length - 1][1], '', 'URL は入力しない（ダミー URL を設定しない）');
 });
 
@@ -173,7 +173,7 @@ test('シート補完: ID管理に不足キーがあれば行を追加（既存�
   const after = e.sheets['ID管理'].data;
   before.forEach((r, i) => assert.deepEqual(after[i], r));
   const added = after.slice(before.length).map((r) => r[0]);
-  assert.deepEqual(added.sort(), ['CHARTER_URL', 'FAQ_PAGE_URL', 'RESERVATION_API_KEY']);
+  assert.deepEqual(added.sort(), ['CHARTER_URL', 'FAQ_PAGE_URL', 'RESERVATION_API_KEY', 'RESERVATION_CHECK_MODE']);
   assert.equal(after.find((r) => r[0] === 'RESERVATION_API_KEY')[2], '秘密情報');
 });
 

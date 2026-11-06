@@ -288,6 +288,7 @@ var RSV_TEXT = {
   TOO_MANY_ATTEMPTS: '🔖 確認の回数が上限に達しました。\nしばらく時間をおいてからお試しいただくか、下記よりオペレーターにご相談くださいませ。',
   NO_VERIFY: '🔖 このLINEアカウントでは、該当するご予約を確認できませんでした。\n' +
     '現在LINEでのご本人様確認は準備中のため、ご予約のご確認は下記よりオペレーターが承ります。',
+  DISABLED: '🔖 予約IDを承りました。\n現在、LINEでのご予約内容の表示は準備中でございます。ご予約のご確認は、下記よりオペレーターが承ります。',
   API_ERROR: '🔖 ただいまご予約情報を確認できません。\nお手数ですが、時間をおいて改めてお試しいただくか、下記よりオペレーターにご相談くださいませ。',
   CANCELLED_INPUT: '✅ ご予約の確認を終了いたしました。\nまたいつでもお気軽にご利用くださいませ。',
   NOT_FOUND_ACTION: '🔖 ご予約を確認できませんでした。\nお手数ですが、メニューの「予約確認」から改めてお試しくださいませ。',
@@ -372,6 +373,13 @@ function handleReservationInput_(ev, userId, text) {
     commit(function () { setReservationState_(userId, { step: 'id', n: n }); });
     return r3;
   }
+  if (reservationCheckMode_() === 'OFF') {
+    // 本人確認方式が未設定：予約は検索せず（存在の有無も答えず）、予約IDを添えてオペレーターへ案内
+    logInfo_('reservation_check.disabled', { userId: userId });
+    var r0d = replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.DISABLED, operatorQuickReply_(rid)));
+    commit(function () { clearReservationState_(userId); });
+    return r0d;
+  }
   var own;
   try {
     own = findOwnReservation_(userId, rid);
@@ -414,11 +422,46 @@ function normalizeContact_(text) {
 
 /** その LINE ユーザーに紐づく予約から予約IDで探す（なければ null。他人の予約は返さない） */
 function findOwnReservation_(userId, rid) {
+  if (!userId || !rid || reservationCheckMode_() === 'OFF') return null;
+  if (reservationSource_() !== 'api') return findOwnReservationInSheet_(userId, rid);
   var list = listReservationsForUser_(userId);
   for (var i = 0; i < list.length; i++) {
     if (String(list[i].reservationId).toUpperCase() === rid && (!list[i].lineUserId || list[i].lineUserId === userId)) return list[i];
   }
   return null;
+}
+
+/** 予約照会に必要な「予約管理」シートの列（なければ設定エラー） */
+var RESERVATION_LOOKUP_COLUMNS = ['予約ID', 'LINEユーザーID', 'プラン名', '搭乗日', '時間帯', '人数', '予約状態'];
+
+/**
+ * 「予約管理」シートから予約IDで探し、その LINE アカウントに紐づく予約だけを返す（本人確認方式 LINE_LINKED）。
+ *   - 予約IDの一致は大文字・小文字・前後の空白を無視
+ *   - 同じ予約IDが複数行ある場合は、どの行も返さない（誤った予約を表示しない）。エラーログに記録し、担当者が確認する
+ *   - LINEユーザーID が空欄・不一致の行は返さない（存在の有無も呼び出し元で区別しない）
+ * シートがない・必要な列がない場合は例外（呼び出し元で「確認できません」と案内し、エラーログに記録）。
+ */
+function findOwnReservationInSheet_(userId, rid) {
+  var sh = getSheet_(SHEETS.RESERVATIONS);
+  var headers = getHeaders_(sh);
+  var lack = RESERVATION_LOOKUP_COLUMNS.filter(function (c) { return headers.indexOf(c) === -1; });
+  if (lack.length) {
+    throw new ConfigError('「予約管理」シートに必要な列がありません: ' + lack.join('、') +
+      '（管理メニュー「シート列・設定行の補完」で追加できます）', lack);
+  }
+  var hits = readRows_(SHEETS.RESERVATIONS).filter(function (row) {
+    return String(row['予約ID'] || '').trim().toUpperCase() === rid;
+  });
+  if (!hits.length) return null;
+  if (hits.length > 1) {
+    logError_('reservation_check.duplicate_id', new Error('「予約管理」シートに同じ予約IDの行が ' + hits.length + ' 行あります（表示を止めました）'),
+      { rows: hits.map(function (h) { return h.__row; }).join(',') });
+    return null;
+  }
+  var row = hits[0];
+  var owner = String(row['LINEユーザーID'] || '').trim();
+  if (!owner || owner !== userId) return null;
+  return reservationFromRow_(row);
 }
 
 /** 予約状況の表示名 */
@@ -428,17 +471,20 @@ function reservationStatusLabel_(r) {
   return STATUS_LABELS[k] || r.status || '';
 }
 
-/** 予約内容の返信（表示は最小限：予約ID・プラン・コース・搭乗予定日・時間帯・人数・予約状況） */
+/**
+ * 予約内容の返信（表示は最小限：予約ID・予約日・予約時間・プラン名・人数・予約ステータス。コースは予約サイト API の場合のみ）。
+ * 予約日・予約時間は「予約管理」の搭乗日・時間帯（ご搭乗の日時）。氏名・連絡先・金額・決済情報は表示しない。
+ */
 function buildReservationCard_(r, rid) {
   var id = r.reservationId || rid;
   var lines = ['🔖 ご予約内容', '予約ID：' + id];
-  if (r.planName) lines.push('プラン：' + r.planName);
+  if (r.flightDate) lines.push('📅 予約日：' + r.flightDate);
+  if (r.timeSlot) lines.push('予約時間：' + r.timeSlot);
+  if (r.planName) lines.push('プラン名：' + r.planName);
   if (r.courseName) lines.push('コース：' + r.courseName);
-  if (r.flightDate) lines.push('📅 搭乗予定日：' + r.flightDate);
-  if (r.timeSlot) lines.push('時間帯：' + r.timeSlot);
   if (r.passengers !== '' && r.passengers != null) lines.push('人数：' + r.passengers + '名');
   var label = reservationStatusLabel_(r);
-  if (label) lines.push('予約状況：' + label);
+  if (label) lines.push('予約ステータス：' + label);
   var enc = encodeURIComponent(id);
   return withQuickReply_(lines.join('\n') + '\n\nご希望のお手続きを下記よりお選びくださいませ。', [
     postbackAction_('予約変更', 'a=rsv_change&rid=' + enc, '予約変更'),
@@ -475,6 +521,9 @@ function reservationClosed_(r) {
  */
 function handleReservationAction_(ev, userId, kind, ridRaw) {
   var rid = normalizeReservationId_(ridRaw);
+  if (reservationCheckMode_() === 'OFF') {
+    return replyMessage_(ev.replyToken, withQuickReply_(RSV_TEXT.DISABLED, operatorQuickReply_(rid)));
+  }
   var r = null;
   try {
     r = rid && userId ? findOwnReservation_(userId, rid) : null;

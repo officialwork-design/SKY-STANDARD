@@ -11,21 +11,23 @@
  *
  * エディタの「実行」から、上から順に実行する：
  *   testSetup            … テスト用スプレッドシートの作成・初期設定（本番シートは読むだけ）
- *   testMakeRichMenuImage… 元画像（PNG）から 1MB 以下の JPEG を別名で作成（元画像は変更しない）
+ *   testMakeRichMenuImage… リッチメニュー画像の確認（1MB 超の PNG の場合だけ JPEG を別名で作成。元画像は変更しない）
  *   testCheck            … 設定・LINE 接続・リッチメニュー定義の確認（LINE には登録しない）
  *   testDeployRichMenu   … テスト用チャネルにリッチメニューを登録
  *   testSeedReservations … 予約確認のテスト用予約（ダミー）を登録
  *   testStatus           … 問い合わせ・有人対応・エラーログの状態を表示
  *   testResumeAutoReply  … 最新の有人対応を終了（自動返信有効=TRUE）
+ *   testClearSiteUrls    … BOOKING_SITE_URL・FAQ_PAGE_URL を空欄にする（「準備中」案内の確認用。再登録が必要）
  */
 
 var TEST_ENV = {
   PROD_SCRIPT_ID: '1zlkPtaZlrSOfKUVKw4rxDmaGB42-niVZtYdDlwSNusnmnn50BB1axmff',
   PROD_SPREADSHEET_ID: '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es',
   PROD_BASIC_ID: '@686mdyho',
-  /** リッチメニューの元画像（Google ドライブ「空と都市を巡るヘリチャーター案内.png」）。変更しない */
-  ORIGINAL_IMAGE_ID: '17JrCm0unhRnSG2En65jmVSl116Sq4ipf',
-  JPEG_NAME: '空と都市を巡るヘリチャーター案内_LINE用.jpg',
+  /** リッチメニュー画像（本番に登録済みの「SKY_STANDARD_LINE_2500x1686.jpg」）。変更しない */
+  ORIGINAL_IMAGE_ID: '140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA',
+  /** テストサイト（予約・FAQ の両方。テスト環境の ID管理 にだけ設定する） */
+  TEST_SITE_URL: 'https://sky-standard-test-677788669305.asia-northeast1.run.app/',
   SPREADSHEET_NAME: '【テスト】SKY STANDARD 公式LINE',
   /** 他人の予約として登録するダミーの LINE ユーザーID（実在しない） */
   OTHER_USER_ID: 'U00000000000000000000000000000000'
@@ -103,13 +105,18 @@ function testSetup() {
   var r = setupSheets_();
   testSetId_('SPREADSHEET_ID', ss.getId());
   testSetId_('GAS_SCRIPT_ID', ScriptApp.getScriptId());
+  // テスト環境の値（本番の ID管理 には書かない）
+  if (!getIdRaw_(ID_KEYS.BOOKING_SITE_URL)) testSetId_('BOOKING_SITE_URL', TEST_ENV.TEST_SITE_URL);
+  if (!getIdRaw_(ID_KEYS.FAQ_PAGE_URL)) testSetId_('FAQ_PAGE_URL', TEST_ENV.TEST_SITE_URL);
+  if (!getIdRaw_(ID_KEYS.RESERVATION_CHECK_MODE)) testSetId_('RESERVATION_CHECK_MODE', 'LINE_LINKED');
   var url = '';
   try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
   if (/\/exec$/.test(url)) testSetId_('GAS_WEBAPP_URL', url);
   lines.push('ID管理に追加した設定キー：' + (r.idKeys.length ? r.idKeys.length + ' 件' : 'なし'));
   lines.push('WEBHOOK_MODE=' + getProp_(PROP_KEYS.WEBHOOK_MODE) + ' / ADMIN_USERS・ADMIN_EMAIL=' + email + '（運営通知はこのメールに届きます）');
   lines.push('GAS_WEBAPP_URL：' + (getSetting_(ID_KEYS.GAS_WEBAPP_URL) || '未設定（ウェブアプリをデプロイ後にもう一度 testSetup を実行）'));
-  lines.push('BOOKING_SITE_URL・FAQ_PAGE_URL は空欄のまま（「準備中」案内の確認用）');
+  lines.push('BOOKING_SITE_URL・FAQ_PAGE_URL：' + (getUrlSetting_(ID_KEYS.BOOKING_SITE_URL) || '空欄') + ' ／ ' + (getUrlSetting_(ID_KEYS.FAQ_PAGE_URL) || '空欄'));
+  lines.push('RESERVATION_CHECK_MODE：' + reservationCheckMode_() + '（テスト環境では LINE アカウント紐づけ照合を有効化）');
   lines.push('スプレッドシート：' + ss.getUrl());
   return testOut_('testSetup', lines);
 }
@@ -144,42 +151,48 @@ function testSetId_(key, value) {
   invalidateIdCache_();
 }
 
-/* ---------- 2. リッチメニュー画像（JPEG・別名） ---------- */
+/* ---------- 2. リッチメニュー画像 ---------- */
 
 /**
- * 元画像（PNG 2.2MB）から、同じ絵柄・同じサイズ（1543×1019）の JPEG を同じフォルダに別名で作る。
+ * リッチメニュー画像（ORIGINAL_IMAGE_ID）を確認し、テスト用 ID管理 の RICHMENU_IMAGE_FILE_ID に設定する。
+ *   - PNG / JPEG・1MB 以下・2500×1686 ならそのまま使う
+ *   - 1MB を超える PNG の場合だけ、同じ絵柄・同じサイズの JPEG を同じフォルダに別名（〜_LINE用.jpg）で作る
  * 元画像は変更しない（実行前後でサイズ・更新日時・ハッシュを比較して確認する）。
- * 同名の JPEG が既にあれば作り直さず、そのファイルを検査する。
  */
 function testMakeRichMenuImage() {
   testGuard_({ needSheet: true });
   var src = DriveApp.getFileById(TEST_ENV.ORIGINAL_IMAGE_ID);
   var before = testFileFingerprint_(src);
-  var folder = src.getParents().hasNext() ? src.getParents().next() : DriveApp.getRootFolder();
-  var lines = ['元画像：' + src.getName() + '（' + Math.round(before.bytes / 1024) + 'KB、' + before.width + '×' + before.height + '）',
-    '保存先フォルダ：' + folder.getName()];
-  var existing = folder.getFilesByName(TEST_ENV.JPEG_NAME);
-  var file;
-  if (existing.hasNext()) {
-    file = existing.next();
-    lines.push('同名の JPEG が既にあるため、作り直さずに検査します');
-  } else {
-    var jpg = src.getBlob().getAs('image/jpeg').setName(TEST_ENV.JPEG_NAME);
-    var jb = jpg.getBytes();
-    var js = imageSizeOf_(jb);
-    if (!js || js.width !== RICHMENU_SIZE.width || js.height !== RICHMENU_SIZE.height || jb.length > 1024 * 1024) {
-      return testOut_('testMakeRichMenuImage（NG：作成しませんでした）', lines.concat([
-        'JPEG 変換結果：' + Math.round(jb.length / 1024) + 'KB、' + (js ? js.width + '×' + js.height : 'サイズ不明'),
-        '1MB 以下・1543×1019 にできないため、ドライブには保存していません。']));
+  var lines = ['元画像：' + src.getName() + '（' + Math.round(before.bytes / 1024) + 'KB、' + before.type + ' ' + before.width + '×' + before.height + '）'];
+  var okSize = before.width === RICHMENU_SIZE.width && before.height === RICHMENU_SIZE.height;
+  var file = src;
+  if (okSize && before.bytes <= 1024 * 1024 && (before.type === 'image/jpeg' || before.type === 'image/png')) {
+    lines.push('【OK】1MB 以下・' + RICHMENU_SIZE.width + '×' + RICHMENU_SIZE.height + ' のため、そのまま使います');
+  } else if (okSize && before.type === 'image/png') {
+    var folder = src.getParents().hasNext() ? src.getParents().next() : DriveApp.getRootFolder();
+    var name = src.getName().replace(/\.[^.]+$/, '') + '_LINE用.jpg';
+    var existing = folder.getFilesByName(name);
+    if (existing.hasNext()) {
+      file = existing.next();
+      lines.push('同名の JPEG が既にあるため、作り直さずに使います：' + name);
+    } else {
+      var jpg = src.getBlob().getAs('image/jpeg').setName(name);
+      var jb = jpg.getBytes();
+      var js = imageSizeOf_(jb);
+      if (!js || js.width !== RICHMENU_SIZE.width || js.height !== RICHMENU_SIZE.height || jb.length > 1024 * 1024) {
+        return testOut_('testMakeRichMenuImage（NG：作成しませんでした）', lines.concat([
+          'JPEG 変換結果：' + Math.round(jb.length / 1024) + 'KB、' + (js ? js.width + '×' + js.height : 'サイズ不明'),
+          '1MB 以下・' + RICHMENU_SIZE.width + '×' + RICHMENU_SIZE.height + ' にできないため、ドライブには保存していません。']));
+      }
+      file = folder.createFile(jpg);
+      lines.push('JPEG を作成しました：' + name + '（フォルダ ' + folder.getName() + '）');
     }
-    file = folder.createFile(jpg);
-    lines.push('JPEG を作成しました');
+  } else {
+    return testOut_('testMakeRichMenuImage（NG）', lines.concat(['画像サイズが ' + RICHMENU_SIZE.width + '×' + RICHMENU_SIZE.height + ' ではありません。']));
   }
-  var fb = file.getBlob().getBytes();
-  var fs = imageSizeOf_(fb);
-  var ok = !!fs && fs.type === 'image/jpeg' && fs.width === RICHMENU_SIZE.width && fs.height === RICHMENU_SIZE.height && fb.length <= 1024 * 1024;
-  lines.push((ok ? '【OK】' : '【NG】') + TEST_ENV.JPEG_NAME + '：' + Math.round(fb.length / 1024) + 'KB、' +
-    (fs ? fs.type + ' ' + fs.width + '×' + fs.height : '形式不明') + '、ファイルID ' + file.getId());
+  var fp = testFileFingerprint_(file);
+  var ok = (fp.type === 'image/jpeg' || fp.type === 'image/png') && fp.width === RICHMENU_SIZE.width && fp.height === RICHMENU_SIZE.height && fp.bytes <= 1024 * 1024;
+  lines.push((ok ? '【OK】' : '【NG】') + file.getName() + '：' + Math.round(fp.bytes / 1024) + 'KB、' + fp.type + ' ' + fp.width + '×' + fp.height + '、ファイルID ' + file.getId());
   var after = testFileFingerprint_(DriveApp.getFileById(TEST_ENV.ORIGINAL_IMAGE_ID));
   var same = before.bytes === after.bytes && before.updated === after.updated && before.md5 === after.md5;
   lines.push((same ? '【OK】元画像は変更されていません' : '【NG】元画像の内容・更新日時が変わっています（要確認）') + '（MD5 ' + after.md5 + '）');
@@ -196,7 +209,7 @@ function testFileFingerprint_(file) {
   var md5 = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, bytes).map(function (b) {
     return ('0' + ((b + 256) % 256).toString(16)).slice(-2);
   }).join('');
-  return { bytes: bytes.length, width: size.width, height: size.height, updated: file.getLastUpdated().getTime(), md5: md5 };
+  return { bytes: bytes.length, type: size.type || '', width: size.width, height: size.height, updated: file.getLastUpdated().getTime(), md5: md5 };
 }
 
 /* ---------- 3. 確認・登録 ---------- */
@@ -245,18 +258,22 @@ function testSeedReservations() {
   var seeds = [
     { id: 'TEST-' + ymd + '-A1B2C3', uid: me, plan: '【テスト】東京夜景遊覧', status: 'CONFIRMED', note: '本人・予約確定' },
     { id: 'TEST-' + ymd + '-D4E5F6', uid: me, plan: '【テスト】横浜ベイ遊覧', status: 'CANCELLED', note: '本人・キャンセル済み' },
-    { id: 'TEST-' + ymd + '-0C0C0C', uid: TEST_ENV.OTHER_USER_ID, plan: '【テスト】他人の予約', status: 'CONFIRMED', note: '他人（表示されないこと）' }
+    { id: 'TEST-' + ymd + '-0C0C0C', uid: TEST_ENV.OTHER_USER_ID, plan: '【テスト】他人の予約', status: 'CONFIRMED', note: '他人（表示されないこと）' },
+    { id: 'TEST-' + ymd + '-DDDDDD', uid: me, plan: '【テスト】重複A', status: 'CONFIRMED', note: '予約ID重複1行目（表示されないこと）', dup: true },
+    { id: 'TEST-' + ymd + '-DDDDDD', uid: me, plan: '【テスト】重複B', status: 'CONFIRMED', note: '予約ID重複2行目', dup: true }
   ];
   var lines = ['本人として使う LINE ユーザーID：' + maskId_(me)];
   withLock_(function () {
     seeds.forEach(function (s) {
-      if (findRow_(SHEETS.RESERVATIONS, '予約ID', s.id)) { lines.push('登録済み：' + s.id + '（' + s.note + '）'); return; }
+      var exists = readRows_(SHEETS.RESERVATIONS).filter(function (r) { return String(r['予約ID']) === s.id && String(r['プラン名']) === s.plan; }).length;
+      if (exists) { lines.push('登録済み：' + s.id + '（' + s.note + '）'); return; }
       appendRow_(SHEETS.RESERVATIONS, { '予約ID': s.id, 'LINEユーザーID': s.uid, 'プランID': 'TEST', 'プラン名': s.plan,
         '搭乗日': day, '時間帯': '18:00', '人数': 2, '予約状態': s.status, '最終更新': nowString_(), '注意事項': 'テストデータ' });
       lines.push('登録：' + s.id + '（' + s.note + '）');
     });
   });
   lines.push('存在しない予約ID の例：TEST-' + ymd + '-FFFFFF ／ 形式違いの例：12345');
+  lines.push('（ダミーデータです。テスト用スプレッドシートだけに登録し、本番の予約管理には登録しません）');
   return testOut_('testSeedReservations', lines);
 }
 
@@ -286,4 +303,13 @@ function testResumeAutoReply() {
   if (!rows.length) return testOut_('testResumeAutoReply', ['有人対応中（自動返信有効=FALSE）の行はありません。']);
   var r = adminRun('operatorRelease', { inquiryId: String(rows[rows.length - 1]['受付ID']) });
   return testOut_('testResumeAutoReply', [r.title, r.message]);
+}
+
+/** BOOKING_SITE_URL・FAQ_PAGE_URL を空欄にする（「準備中」案内の確認用。リッチメニューは testDeployRichMenu で再登録） */
+function testClearSiteUrls() {
+  testGuard_({ needSheet: true });
+  testSetId_('BOOKING_SITE_URL', '');
+  testSetId_('FAQ_PAGE_URL', '');
+  return testOut_('testClearSiteUrls', ['BOOKING_SITE_URL・FAQ_PAGE_URL を空欄にしました（テスト用 ID管理）。testDeployRichMenu で再登録すると「準備中」表示になります。',
+    '戻すときは testSetup を再実行してください（空欄の項目だけテストサイトの URL を入れます）。']);
 }

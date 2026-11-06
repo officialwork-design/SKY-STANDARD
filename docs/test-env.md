@@ -9,9 +9,10 @@
 | LINE | 公式アカウント @686mdyho | 新しく作るテスト用 Messaging API チャネル |
 | GAS | 1zlkPtaZ…（変更しない） | 新しく作る GAS プロジェクト（`build/test-env/`） |
 | スプレッドシート | 1pzu1_…（変更しない） | `testSetup` が新規作成（通知テンプレート・FAQ だけ本番から読み取ってコピー） |
-| 画像 | 空と都市を巡るヘリチャーター案内.png（変更しない） | 同じフォルダに `空と都市を巡るヘリチャーター案内_LINE用.jpg` を作成（1MB 以下・1543×1019） |
-| URL | — | `BOOKING_SITE_URL`・`FAQ_PAGE_URL` は空欄（「準備中」の確認） |
-| 予約 | — | ダミー予約3件（`TEST-…`）。予約サイト API・PostgreSQL は使わない |
+| 画像 | SKY_STANDARD_LINE_2500x1686.jpg（`140_OG…`、変更しない） | 同じ画像を使う（1MB 以下・2500×1686 を確認。1MB 超の PNG の場合だけ別名の JPEG を作成） |
+| URL | ID管理（本番の値は変更しない） | `BOOKING_SITE_URL`・`FAQ_PAGE_URL` ＝ テストサイト（`testClearSiteUrls` で空欄にして「準備中」も確認可） |
+| 本人確認方式 | `RESERVATION_CHECK_MODE` 空欄（表示しない） | `LINE_LINKED` |
+| 予約 | — | 架空の予約5行（`TEST-…`：本人の確定・本人のキャンセル済み・他人・予約ID重複2行）。予約サイト API・PostgreSQL は使わない |
 
 `src/test-env/TestEnv.gs` は、次のいずれかに当たると何もせずに止まります：本番の GAS プロジェクトで実行した／`SPREADSHEET_ID` が本番のシート／LINE トークンが @686mdyho のもの。
 
@@ -47,23 +48,24 @@ node tools/test-env/build.js
 | 順 | 関数 | 内容 |
 |---|---|---|
 | 1 | `testSetup` | テスト用スプレッドシートを作成。WEBHOOK_MODE=direct、ADMIN_USERS・ADMIN_EMAIL=実行者（運営通知はこのメールに届く）。初回は Google の承認画面が出ます |
-| 2 | `testMakeRichMenuImage` | 1MB 以下の JPEG を同じフォルダに別名で作成し、元画像が変わっていないことを確認。テスト用 ID管理 の RICHMENU_IMAGE_FILE_ID に設定 |
+| 2 | `testMakeRichMenuImage` | 画像（2500×1686・1MB 以下）を確認し、テスト用 ID管理 の RICHMENU_IMAGE_FILE_ID に設定。元画像が変わっていないことも確認 |
 | 3 | デプロイ | 「デプロイ」→「新しいデプロイ」→ ウェブアプリ（次のユーザーとして実行：自分／アクセス：全員）→ URL をコピー |
 | 4 | `testSetup`（再実行） | ウェブアプリの URL を GAS_WEBAPP_URL に記録 |
 | 5 | LINE Developers | テスト用チャネルの Webhook URL にウェブアプリの URL を設定 →「Webhookの利用」ON |
 | 6 | `testCheck` | トークン・チャット設定・Webhook 疎通・4領域の定義・画像を確認（LINE には登録しない） |
 | 7 | `testDeployRichMenu` | **テスト用チャネル**にリッチメニューを登録 |
 | 8 | スマホ | テスト用アカウントを友だち追加 |
-| 9 | `testSeedReservations` | 友だち追加した本人の予約2件（確定・キャンセル済み）と他人の予約1件を登録。予約IDがログに出ます |
+| 9 | `testSeedReservations` | 友だち追加した本人の予約2件（確定・キャンセル済み）・他人の予約1件・予約ID重複2行を登録。予約IDがログに出ます |
 
 ## 5. スマホでの確認項目
 
-結果は `testStatus` とテスト用スプレッドシートで確認します。モック環境での同じ確認の結果は [test-reports/2026-10-30-mock.md](test-reports/2026-10-30-mock.md)（`node tools/test-env/scenario.js`）。
+結果は `testStatus` とテスト用スプレッドシートで確認します。モック環境での同じ確認の結果は [test-reports/2026-11-06-mock.md](test-reports/2026-11-06-mock.md)（`node tools/test-env/scenario.js`）。
 
 **A. リッチメニュー（4領域）**
 - [ ] 画像が4領域（上部全面・下段3つ）で表示され、文字の位置とタップ位置が合っている
-- [ ] 「ご予約はこちら」→ 準備中の案内
-- [ ] 「よくある質問」→ 準備中の案内
+- [ ] 「ご予約はこちら」→ テストサイトが開く
+- [ ] 「よくある質問」→ テストサイトが開く
+- [ ] （任意）`testClearSiteUrls` → `testDeployRichMenu` 後、2つのボタンが「準備中」の案内になる
 - [ ] 「予約確認」→ 予約IDの入力案内
 - [ ] 「お問い合わせ」→ 4項目のボタン
 
@@ -73,6 +75,8 @@ node tools/test-env/build.js
 - [ ] ［予約変更］→ 担当者が承る案内／［キャンセル］→ 規定の案内と「キャンセルされておりません」。シートの予約状態は変わらない
 - [ ] 本人のキャンセル済み予約（`…-D4E5F6`）→［予約変更］で「お受けできません」
 - [ ] 他人の予約（`…-0C0C0C`）・存在しない ID → 同じ文面で「確認できませんでした」＋オペレーター導線
+- [ ] 予約ID重複（`…-DDDDDD`）→ どちらの行も表示されない。エラーログに記録
+- [ ] テスト用 ID管理 の `RESERVATION_CHECK_MODE` を空欄にして本人の予約IDを送信 → 内容は表示されず「準備中」＋オペレーター導線
 - [ ] ［入力をやめる］で終了／10分放置で終了
 
 **C. お問い合わせ4項目**
@@ -94,4 +98,4 @@ node tools/test-env/build.js
 ## 6. 後片付け・本番反映（承認後）
 
 - テスト用チャネル・GAS・スプレッドシートは削除しなくても本番に影響しません。
-- 本番反映（承認後）：本体 GAS へ反映 → ウェブアプリを新バージョンで更新 → 本番 ID管理 の `RICHMENU_IMAGE_FILE_ID` を作成した JPEG のファイルIDに変更 → 管理メニュー「リッチメニュー設定確認」→「リッチメニュー登録・更新」。手順は README「0. 公式LINEの構成とフロー」。
+- 本番反映（承認後）：README「0. 公式LINEの構成とフロー」の「clasp push とデプロイ更新手順」。

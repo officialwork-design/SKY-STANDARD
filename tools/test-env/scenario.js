@@ -22,6 +22,8 @@ const DAY = '20261106';
 const RID_A = 'TEST-' + DAY + '-A1B2C3';
 const RID_B = 'TEST-' + DAY + '-D4E5F6';
 const RID_C = 'TEST-' + DAY + '-0C0C0C';
+const RID_DUP = 'TEST-' + DAY + '-DDDDDD';
+const TEST_SITE = 'https://sky-standard-test-677788669305.asia-northeast1.run.app/';
 
 function runScenario() {
   const good = new Set();
@@ -41,7 +43,9 @@ function runScenario() {
     }
   });
   const run = (code) => vm.runInContext(code, e.ctx);
-  [[RID_A, ME, '【テスト】東京夜景遊覧', 'CONFIRMED'], [RID_B, ME, '【テスト】横浜ベイ遊覧', 'CANCELLED'], [RID_C, OTHER, '【テスト】他人の予約', 'CONFIRMED']]
+  // 架空の予約（テスト用）。重複は同じ予約IDの行が2行ある状態
+  [[RID_A, ME, '【テスト】東京夜景遊覧', 'CONFIRMED'], [RID_B, ME, '【テスト】横浜ベイ遊覧', 'CANCELLED'], [RID_C, OTHER, '【テスト】他人の予約', 'CONFIRMED'],
+    [RID_DUP, ME, '【テスト】重複A', 'CONFIRMED'], [RID_DUP, ME, '【テスト】重複B', 'CONFIRMED']]
     .forEach((r) => run("appendRow_(SHEETS.RESERVATIONS, {'予約ID':'" + r[0] + "','LINEユーザーID':'" + r[1] + "','プランID':'TEST','プラン名':'" + r[2] +
       "','搭乗日':'2026-11-06','時間帯':'18:00','人数':2,'予約状態':'" + r[3] + "','注意事項':'テストデータ'})"));
 
@@ -89,10 +93,33 @@ function runScenario() {
   send('「ご予約はこちら」をタップ', tap('a=menu_unset&item=BOOKING'), [['準備中と案内', has(/準備中/)]]);
   send('「よくある質問」をタップ', tap('a=menu_unset&item=FAQ'), [['準備中と案内', has(/準備中/)]]);
 
-  section = '3. 予約確認（LINE 連携済みの予約のみ）';
+  section = '2b. リッチメニュー（テストサイトの URL を設定）';
+  e.setSetting('BOOKING_SITE_URL', TEST_SITE);
+  e.setSetting('FAQ_PAGE_URL', TEST_SITE);
+  const def = e.ctx.buildRichMenuDefinition_().definition;
+  steps.push({ section, label: 'リッチメニュー定義（再登録で反映される内容）', replied: false,
+    text: def.areas.map((a) => a.action.label + '：x' + a.bounds.x + ' y' + a.bounds.y + ' ' + a.bounds.width + '×' + a.bounds.height + ' → ' + (a.action.uri || a.action.data)).join('\n'),
+    buttons: [], checks: [
+      { name: '画像サイズ 2500×1686・4領域', ok: def.size.width === 2500 && def.size.height === 1686 && def.areas.length === 4 },
+      { name: 'タップ座標が登録済みメニューと同じ', ok: JSON.stringify(def.areas.map((a) => [a.bounds.x, a.bounds.y, a.bounds.width, a.bounds.height])) ===
+        JSON.stringify([[0, 0, 2500, 885], [0, 885, 833, 801], [833, 885, 833, 801], [1666, 885, 834, 801]]) },
+      { name: 'ご予約はこちら → テストサイトを開く', ok: def.areas[0].action.type === 'uri' && def.areas[0].action.uri === TEST_SITE },
+      { name: 'よくある質問 → テストサイトを開く', ok: def.areas[3].action.type === 'uri' && def.areas[3].action.uri === TEST_SITE },
+      { name: '予約確認・お問い合わせは LINE 内の操作のまま', ok: def.areas[1].action.data === 'a=rsv_start' && def.areas[2].action.data === 'a=inq_start' }] });
+  send('再登録前の旧ボタン「ご予約はこちら」（準備中 postback）', tap('a=menu_unset&item=BOOKING'), [['テストサイトへのリンクを案内', (r) => r.buttons.some((b) => b.indexOf(TEST_SITE) !== -1)]]);
+  send('「FAQ」と送信', say('FAQ'), [['テストサイトへのリンクを案内', (r) => r.buttons.some((b) => b.indexOf(TEST_SITE) !== -1)]]);
+
+  section = '3a. 予約確認（本人確認方式が未設定＝既定）';
+  send('「予約確認」をタップ', tap('a=rsv_start'), [['予約IDの入力を案内', has(/予約ID/)]]);
+  send('本人の予約 ' + RID_A + ' を送信', say(RID_A), [['予約内容を表示しない', (r) => !/予約ID：|東京夜景遊覧|予約ステータス/.test(r.text)],
+    ['準備中とオペレーター導線', (r) => /準備中/.test(r.text) && r.buttons.some((b) => b.indexOf('オペレーター') === 0)]]);
+
+  section = '3. 予約確認（本人確認方式 LINE_LINKED：LINE 連携済みの予約のみ）';
+  e.setSetting('RESERVATION_CHECK_MODE', 'LINE_LINKED');
   send('「予約確認」をタップ', tap('a=rsv_start'), [['予約IDの入力を案内', has(/予約ID/)]]);
   send('形式違い「12345」を送信', say('12345'), [['再入力を案内', has(/予約ID/)], ['予約内容は出さない', (r) => !/ご予約内容/.test(r.text)]]);
-  send('本人の予約 ' + RID_A + ' を送信', say(RID_A), [['予約内容を表示', has(/ご予約内容/)], ['プラン名を表示', has(/東京夜景遊覧/)],
+  send('本人の予約 ' + RID_A + ' を送信', say(RID_A), [['予約内容を表示', has(/ご予約内容/)], ['プラン名を表示', has(/プラン名：【テスト】東京夜景遊覧/)],
+    ['予約日・予約時間・人数・予約ステータス', has(/予約日：2026-11-06\n予約時間：18:00[\s\S]*人数：2名\n予約ステータス：予約確定/)],
     ['予約変更ボタン', btn('予約変更')], ['キャンセルボタン', btn('キャンセル')], ['オペレーターボタン', btn('オペレーター')],
     ['氏名・金額は出さない', (r) => !/金額|氏名|電話/.test(r.text)]]);
   send('「予約変更」をタップ', tap('a=rsv_change&rid=' + RID_A), [['担当者が承る案内', has(/担当者/)], ['予約は変更しない', () => e.rows('予約管理')[0]['予約状態'] === 'CONFIRMED']]);
@@ -104,6 +131,9 @@ function runScenario() {
     [['他人の予約は表示しない', (r) => !/他人の予約/.test(r.text) && !/ご予約内容/.test(r.text)], ['オペレーターへ案内', btn('オペレーター')]]);
   send('「予約確認」→ 存在しない予約ID', (send('「予約確認」をタップ', tap('a=rsv_start')), say('TEST-' + DAY + '-FFFFFF')),
     [['同じ文面で案内（存在の有無を答えない）', (r) => r.text === steps[steps.length - 2].text], ['オペレーターへ案内', btn('オペレーター')]]);
+  send('「予約確認」→ 予約ID重複 ' + RID_DUP + '（2行）', (send('「予約確認」をタップ', tap('a=rsv_start')), say(RID_DUP)),
+    [['どちらの予約も表示しない', (r) => !/重複A|重複B|ご予約内容/.test(r.text)], ['オペレーターへ案内', btn('オペレーター')],
+      ['エラーログに記録（担当者が確認）', () => (e.sheets['エラーログ'] ? e.rows('エラーログ') : []).some((x) => /同じ予約IDの行が 2 行/.test(JSON.stringify(x)))]]);
 
   section = '4. お問い合わせ（4項目）';
   send('「お問い合わせ」をタップ', tap('a=inq_start'), [['チャーター見積', btn('チャーター見積')], ['フライト予約について', btn('フライト予約')],
@@ -146,7 +176,9 @@ function runScenario() {
   section = '8. グループでは予約内容を出さない';
   send('グループで「予約確認」をタップ', tap('a=rsv_start', { type: 'group', groupId: 'C' + '1'.repeat(32), userId: ME }), [['1:1 トークへ誘導', has(/1:1|トーク/)]]);
 
-  const errors = e.sheets['エラーログ'] ? e.rows('エラーログ') : [];
+  const allErrors = e.sheets['エラーログ'] ? e.rows('エラーログ') : [];
+  // 予約ID重複の記録は想定どおり（3. の確認項目）。それ以外のエラーを数える
+  const errors = allErrors.filter((x) => !/同じ予約IDの行が/.test(JSON.stringify(x)));
   return { steps, errors, pushes: e.linePosts('/v2/bot/message/push').length };
 }
 

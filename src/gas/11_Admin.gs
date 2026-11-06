@@ -142,6 +142,7 @@ var ADMIN_ACTIONS = {
     var r = deployRichMenu_();
     return { ok: true, title: 'リッチメニューを登録しました',
       message: 'リッチメニューID: ' + r.richMenuId + '\n' +
+        (r.previousId ? '切り替え前のメニュー（' + r.previousId + '）は削除せずに残しています（切り戻し用）。\n' : '') +
         (r.unset.length ? 'URL未設定のため「準備中」と表示されるボタン: ' + r.unset.join('、') : 'すべてのボタンにURLが設定されています。') };
   },
   richMenuCheck: function () { return adminRichMenuCheck_(); },
@@ -414,7 +415,7 @@ function adminCheckLine_(p) {
 /**
  * リッチメニュー設定確認（LINE には何も登録しない）。
  *   - 各ボタンの動作（リンク／準備中表示／メッセージ送信）とタップ領域
- *   - 画像の検査（形式・1MB 以下（PNG は JPEG 変換後）・1543×1019px）
+ *   - 画像の検査（形式・1MB 以下（PNG は JPEG 変換後）・2500×1686px）
  *   - LINE 側の既定メニューとの差分（URL を設定した後に再登録が必要か）
  */
 function adminRichMenuCheck_() {

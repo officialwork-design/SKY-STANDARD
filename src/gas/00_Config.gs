@@ -17,7 +17,7 @@ var APP = {
    * 「デプロイ済み Web アプリ」の版を比較して、反映漏れ（clasp push 後に新バージョンを
    * デプロイしていない等）を検出する。コードを変更したら更新する。
    */
-  BUILD: '2026-10-30.1-flow-v2',
+  BUILD: '2026-11-06.1-rsv-sheet',
   TIMEZONE: 'Asia/Tokyo',
   LINE_API_BASE: 'https://api.line.me',
   LINE_DATA_API_BASE: 'https://api-data.line.me',
@@ -95,7 +95,14 @@ var ID_KEYS = {
   FAQ_PAGE_URL: { key: 'FAQ_PAGE_URL', label: 'よくある質問ページURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['リッチメニュー', '自動応答'] },
   ADMIN_NOTIFY_TARGET: { key: 'ADMIN_NOTIFY_TARGET', label: '管理者LINE通知先ID', pattern: /^([UCR][0-9a-f]{32})([,、\s]+[UCR][0-9a-f]{32})*$/, usedBy: ['運営通知'] },
   RICHMENU_IMAGE_FILE_ID: { key: 'RICHMENU_IMAGE_FILE_ID', label: 'リッチメニュー画像ファイルID', pattern: /^[A-Za-z0-9_-]{20,}$/, usedBy: ['リッチメニュー登録'], propFallback: true },
-  RESERVATION_API_BASE_URL: { key: 'RESERVATION_API_BASE_URL', label: '予約システムAPIのURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['予約確認（API連携・任意）'], propFallback: true }
+  RESERVATION_API_BASE_URL: { key: 'RESERVATION_API_BASE_URL', label: '予約システムAPIのURL', pattern: /^https:\/\/[^\s]+$/i, usedBy: ['予約確認（API連携・任意）'], propFallback: true },
+  /**
+   * LINE トークの予約確認で予約内容を表示するか（本人確認方式）。
+   *   LINE_LINKED … 「予約管理」シートの LINEユーザーID が問い合わせた LINE アカウントと一致する予約だけ表示
+   *   空欄・OFF  … 表示しない（予約IDを受け付けてオペレーターへ案内）。既定
+   * 予約IDだけでは表示しない。本人確認方式を決めてから管理者が設定する。
+   */
+  RESERVATION_CHECK_MODE: { key: 'RESERVATION_CHECK_MODE', label: '予約確認の本人確認方式（LINE_LINKED／OFF）', pattern: /^(LINE_LINKED|OFF)$/i, usedBy: ['予約確認（LINEトーク）'] }
 };
 
 /**
@@ -290,9 +297,9 @@ function checkConfig_() {
   need('リッチメニュー', !!getUrlSetting_(ID_KEYS.BOOKING_SITE_URL), idLabel(ID_KEYS.BOOKING_SITE_URL));
   need('リッチメニュー', !!getUrlSetting_(ID_KEYS.FAQ_PAGE_URL), idLabel(ID_KEYS.FAQ_PAGE_URL));
   need('リッチメニュー', !!getSetting_(ID_KEYS.RICHMENU_IMAGE_FILE_ID), idLabel(ID_KEYS.RICHMENU_IMAGE_FILE_ID));
-  // LINE トークでの予約確認：予約サイト API がなければ本人確認（電話番号・メール照合）ができない
-  need('予約確認（LINEトーク）', !!getSetting_(ID_KEYS.RESERVATION_API_BASE_URL), idLabel(ID_KEYS.RESERVATION_API_BASE_URL) +
-    ' … 未設定の間は「予約管理」シートで LINE ユーザーIDが紐づいた予約だけを表示');
+  // LINE トークでの予約確認：本人確認方式が未設定の間は予約内容を表示しない（オペレーターへ案内）
+  need('予約確認（LINEトーク）', reservationCheckMode_() !== 'OFF', idLabel(ID_KEYS.RESERVATION_CHECK_MODE) +
+    ' … 未設定の間は予約内容を表示せず、オペレーターへ案内');
   need('運営通知', !!getSetting_(ID_KEYS.ADMIN_NOTIFY_TARGET) || !!getProp_(PROP_KEYS.ADMIN_EMAIL),
     'ADMIN_NOTIFY_TARGET（管理者LINE通知先ID・ID管理シート）または ADMIN_EMAIL（スクリプトプロパティ）');
   if (getSetting_(ID_KEYS.RESERVATION_API_BASE_URL)) {
@@ -301,6 +308,13 @@ function checkConfig_() {
       'RESERVATION_API_ALLOWED_HOST（スクリプトプロパティ。API キーを送ってよいホスト名）');
   }
   return { ok: Object.keys(missing).length === 0, missing: missing, warnings: configWarnings_() };
+}
+
+/**
+ * LINE トークの予約確認の本人確認方式。'LINE_LINKED'（LINE アカウント紐づけ照合）／'OFF'（表示しない・既定）
+ */
+function reservationCheckMode_() {
+  return String(getSetting_(ID_KEYS.RESERVATION_CHECK_MODE) || '').toUpperCase() === 'LINE_LINKED' ? 'LINE_LINKED' : 'OFF';
 }
 
 /**

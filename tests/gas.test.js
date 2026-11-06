@@ -292,14 +292,14 @@ test('受付IDは連番で採番', () => {
 
 /* ---------- リッチメニュー ---------- */
 
-test('リッチメニュー定義: 4 領域（上部全面＋下段3分割）が 1543×1019 を重複なく覆う', () => {
+test('リッチメニュー定義: 4 領域（上部全面＋下段3分割）が 2500×1686 を重複なく覆う', () => {
   const env = envWith();
   const d = env.ctx.buildRichMenuDefinition_().definition;
   assert.equal(d.areas.length, 4);
-  assert.deepEqual({ ...d.size }, { width: 1543, height: 1019 });
+  assert.deepEqual({ ...d.size }, { width: 2500, height: 1686 });
   let area = 0;
   d.areas.forEach((a) => { area += a.bounds.width * a.bounds.height; });
-  assert.equal(area, 1543 * 1019);
+  assert.equal(area, 2500 * 1686);
   assert.deepEqual([...d.areas.map((a) => a.action.label)], ['ご予約はこちら', '予約確認', 'お問い合わせ', 'よくある質問']);
 });
 
@@ -554,7 +554,7 @@ test('setupSheets は既存データを保持し、不足列・設定行のみ�
   assert.deepEqual([...r.columns['送信ログ']], ['冪等キー', 'イベントID', '再試行回数']);
   assert.deepEqual([...r.columns['予約管理']], ['集合場所', '注意事項', '最終イベント日時']);
   settingsBefore.forEach((row, i) => assert.deepEqual(env.sheets['LINE設定'].data[i].slice(0, 3), row));
-  assert.deepEqual([...r.idKeys], ['FAQ_PAGE_URL']);
+  assert.deepEqual([...r.idKeys], ['FAQ_PAGE_URL', 'RESERVATION_CHECK_MODE']);
   assert.equal(r.missingSheets.length, 0);
   // 2回目は何も追加しない
   const r2 = env.ctx.setupSheets_();

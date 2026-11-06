@@ -10,18 +10,19 @@ const { createGasEnv, relayEnvelope, fakeImage } = require('./helpers/gas-env');
 
 const USER = 'U' + 'a'.repeat(32);
 const BOT = 'U' + 'f'.repeat(32);
-const IMG_ID = '17JrCm0unhRnSG2En65jmVSl116Sq4ipf';
-const IMG_NAME = '空と都市を巡るヘリチャーター案内.png';
-const W = 1543, H = 1019;
+// 登録済みの画像（2026-10-30 登録 richmenu-b7381e62ad819d8d7adb1bde3b55afe9）
+const IMG_ID = '140_OGMEvGkWCUvlP3nbyfGUgx1c2hktA';
+const IMG_NAME = 'SKY_STANDARD_LINE_2500x1686.jpg';
+const W = 2500, H = 1686;
+const PNG_FILE = () => ({ [IMG_ID]: { name: 'menu.png', contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024),
+  asJpeg: fakeImage('jpeg', W, H, 420 * 1024) } });
 
 function env(opts = {}) {
   const e = createGasEnv({
     props: Object.assign({ LINE_CHANNEL_ACCESS_TOKEN: 'tok', RELAY_SHARED_SECRET: 'r',
       SPREADSHEET_ID: '1pzu1_-X8-Y7AhAq4ctwgfliYnImkPe6sa4d_TBth1Es', ADMIN_USERS: 'owner@example.com' }, opts.props || {}),
     fetch: opts.fetch || ((url) => (/\/v2\/bot\/user\/all\/richmenu$/.test(url) ? { code: 404, body: { message: 'not found' } } : { code: 200, body: {} })),
-    // 実画像は PNG 2.2MB（LINE 上限 1MB 超）。GAS の Blob.getAs で JPEG に変換して使う
-    driveFiles: opts.driveFiles || { [IMG_ID]: { name: IMG_NAME, contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024),
-      asJpeg: fakeImage('jpeg', W, H, 420 * 1024) } }
+    driveFiles: opts.driveFiles || { [IMG_ID]: { name: IMG_NAME, contentType: 'image/jpeg', bytes: fakeImage('jpeg', W, H, 800 * 1024) } }
   });
   e.setSetting('RICHMENU_IMAGE_FILE_ID', IMG_ID);
   return e;
@@ -30,7 +31,7 @@ const areasOf = (e) => JSON.parse(JSON.stringify(e.ctx.buildRichMenuDefinition_(
 
 /* ---------- タップ領域 ---------- */
 
-test('タップ領域は4つ（上部全面＋下段3分割）で、画像全面（1543×1019）を重なり・隙間なく覆う', () => {
+test('タップ領域は4つ（上部全面＋下段3分割）で、画像全面（2500×1686）を重なり・隙間なく覆う（登録済みメニューと同じ）', () => {
   const e = env();
   const d = JSON.parse(JSON.stringify(e.ctx.buildRichMenuDefinition_().definition));
   assert.deepEqual(d.size, { width: W, height: H });
@@ -49,20 +50,20 @@ test('タップ領域は4つ（上部全面＋下段3分割）で、画像全面
   }
 });
 
-test('タップ判定：画像の各ボタンの絵柄が対応する領域に入り、区切り線（実測 y=535〜536, x=514〜516 / 1028〜1030）が境界', () => {
+test('タップ判定：画像の各ボタンの絵柄が対応する領域に入り、区切り線（実測 y≈885〜887, x≈833〜835 / 1666〜1668）が境界', () => {
   const a = areasOf(env());
   assert.deepEqual(a.map((x) => x.action.label), ['ご予約はこちら', '予約確認', 'お問い合わせ', 'よくある質問']);
   assert.deepEqual(a.map((x) => [x.bounds.x, x.bounds.y, x.bounds.width, x.bounds.height]),
-    [[0, 0, 1543, 536], [0, 536, 515, 483], [515, 536, 514, 483], [1029, 536, 514, 483]]);
+    [[0, 0, 2500, 885], [0, 885, 833, 801], [833, 885, 833, 801], [1666, 885, 834, 801]]);
   const hit = (px, py) => a.find((x) => px >= x.bounds.x && px < x.bounds.x + x.bounds.width && py >= x.bounds.y && py < x.bounds.y + x.bounds.height).action.label;
-  // 画像上の文字・アイコンの位置（800×530 表示の実測を 1543×1019 に換算）
-  assert.equal(hit(270, 375), 'ご予約はこちら');   // 「ご予約はこちら ❯❯❯❯」
-  assert.equal(hit(1100, 300), 'ご予約はこちら');  // ヘリコプター
-  assert.equal(hit(258, 805), '予約確認');        // 「予約確認」
-  assert.equal(hit(772, 805), 'お問い合わせ');    // 「お問い合わせ」
-  assert.equal(hit(1290, 805), 'よくある質問');   // 「よくある質問」
-  assert.equal(hit(0, 1018), '予約確認');
-  assert.equal(hit(1542, 1018), 'よくある質問');
+  // 画像上の文字・アイコンの位置（ドライブのプレビュー 1600×1079 での実測を 2500×1686 に換算）
+  assert.equal(hit(450, 505), 'ご予約はこちら');   // 「ご予約はこちら」
+  assert.equal(hit(1720, 320), 'ご予約はこちら');  // ヘリコプター
+  assert.equal(hit(425, 1110), '予約確認');        // 「予約確認」
+  assert.equal(hit(1255, 1110), 'お問い合わせ');   // 「お問い合わせ」
+  assert.equal(hit(2075, 1110), 'よくある質問');   // 「よくある質問」
+  assert.equal(hit(0, 1685), '予約確認');
+  assert.equal(hit(2499, 1685), 'よくある質問');
 });
 
 /* ---------- ボタンの動作 ---------- */
@@ -81,13 +82,21 @@ test('URL 未設定：予約確認・お問い合わせは LINE 内の postback�
   assert.deepEqual([...env().ctx.buildRichMenuDefinition_().unset], ['ご予約はこちら', 'よくある質問']);
 });
 
-test('公式サイト・FAQ の URL を設定すると、ご予約はこちら・よくある質問がリンクに切り替わる', () => {
+test('テストサイトの URL を設定すると、ご予約はこちら・よくある質問がリンクに切り替わる（座標は変わらない）', () => {
+  const TEST_SITE = 'https://sky-standard-test-677788669305.asia-northeast1.run.app/';
   const e = env();
-  e.setSetting('BOOKING_SITE_URL', 'https://sky-standard.example/');
-  e.setSetting('FAQ_PAGE_URL', 'https://sky-standard.example/faq');
+  const before = areasOf(e).map((x) => x.bounds);
+  e.setSetting('BOOKING_SITE_URL', TEST_SITE);
+  e.setSetting('FAQ_PAGE_URL', TEST_SITE);
   const a = areasOf(e);
   assert.deepEqual(a.map((x) => [x.action.type, x.action.uri || x.action.data]), [
-    ['uri', 'https://sky-standard.example/'], ['postback', 'a=rsv_start'], ['postback', 'a=inq_start'], ['uri', 'https://sky-standard.example/faq']]);
+    ['uri', TEST_SITE], ['postback', 'a=rsv_start'], ['postback', 'a=inq_start'], ['uri', TEST_SITE]]);
+  assert.deepEqual(a.map((x) => x.bounds), before);
+  assert.deepEqual([...e.ctx.buildRichMenuDefinition_().unset], []);
+  // FAQ 専用ページができたら FAQ_PAGE_URL だけ変えればよい
+  e.setSetting('FAQ_PAGE_URL', 'https://sky-standard.example/faq');
+  assert.equal(areasOf(e)[3].action.uri, 'https://sky-standard.example/faq');
+  assert.equal(areasOf(e)[0].action.uri, TEST_SITE);
   // http や不正な URL は使わない
   const e2 = env();
   e2.setSetting('FAQ_PAGE_URL', 'http://sky-standard.example/faq');
@@ -171,24 +180,31 @@ test('準備中ボタンのタップはエラーログに記録しない', () =>
 
 /* ---------- 画像の検査 ---------- */
 
-test('画像検査：指定画像（PNG 1543×1019・2.2MB）は JPEG に変換して 1MB 以下・同サイズで使う（元画像は変更しない）', () => {
-  const e = env();
-  const r = e.ctx.validateRichMenuImage_();
+test('画像検査：登録済みの画像（JPEG 2500×1686）はそのまま使える', () => {
+  const r = env().ctx.validateRichMenuImage_();
   assert.equal(r.ok, true);
   assert.equal(r.width, W);
   assert.equal(r.height, H);
   assert.equal(r.type, 'image/jpeg');
+  assert.equal(r.converted, '');
+  assert.equal(r.name, IMG_NAME);
+});
+
+test('画像検査：1MB を超える PNG は JPEG に変換して 1MB 以下・同サイズで使う（元画像は変更しない）', () => {
+  const e = env({ driveFiles: PNG_FILE() });
+  const r = e.ctx.validateRichMenuImage_();
+  assert.equal(r.ok, true);
+  assert.equal(r.type, 'image/jpeg');
   assert.ok(r.bytes <= 1024 * 1024);
   assert.match(r.converted, /PNG（2200KB）を JPEG（420KB）に変換して使用/);
-  assert.equal(r.name, IMG_NAME);
 });
 
 test('画像検査：サイズ違い・1MB 超（変換できない）・PNG/JPEG 以外・ファイルなしは NG（日本語で表示）', () => {
   const mk = (f) => env({ driveFiles: { [IMG_ID]: Object.assign({ name: 'x' }, f) } }).ctx.validateRichMenuImage_();
-  assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', 2500, 1686) }).problems.join(), /1543×1019px にしてください（現在: 2500×1686px）/);
+  assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', 1543, 1019) }).problems.join(), /2500×1686px にしてください（現在: 1543×1019px）/);
   assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024) }).problems.join(), /1MB 以下/);
   assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024), asJpeg: fakeImage('jpeg', W, H, 1500 * 1024) }).problems.join(), /1MB 以下/);
-  assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024), asJpeg: fakeImage('jpeg', 800, 528, 200 * 1024) }).problems.join(), /1MB 以下/,
+  assert.match(mk({ contentType: 'image/png', bytes: fakeImage('png', W, H, 2200 * 1024), asJpeg: fakeImage('jpeg', 1250, 843, 200 * 1024) }).problems.join(), /1MB 以下/,
     '変換でサイズが変わる場合は使わない');
   assert.match(mk({ contentType: 'image/gif', bytes: Buffer.from('GIF89a' + 'x'.repeat(100)) }).problems.join(), /PNG または JPEG/);
   const none = env({ driveFiles: {} }).ctx.validateRichMenuImage_();
@@ -197,11 +213,11 @@ test('画像検査：サイズ違い・1MB 超（変換できない）・PNG/JPE
   assert.equal(mk({ contentType: 'image/jpeg', bytes: fakeImage('jpeg', W, H) }).ok, true);
 });
 
-test('画像に問題があれば LINE には何も作らずに止める（旧画像 2500×1686 のままでは登録しない）', () => {
-  const e = env({ driveFiles: { [IMG_ID]: { name: 'old', contentType: 'image/jpeg', bytes: fakeImage('jpeg', 2500, 1686) } } });
+test('画像に問題があれば LINE には何も作らずに止める（サイズ違いの画像では登録しない）', () => {
+  const e = env({ driveFiles: { [IMG_ID]: { name: 'other', contentType: 'image/jpeg', bytes: fakeImage('jpeg', 1543, 1019) } } });
   const r = e.ctx.adminRun('richMenuDeploy');
   assert.equal(r.ok, false);
-  assert.match(r.message, /画像サイズを 1543×1019px にしてください/);
+  assert.match(r.message, /画像サイズを 2500×1686px にしてください/);
   assert.equal(e.fetchCalls.filter((c) => /api(-data)?\.line\.me/.test(c.url)).length, 0);
 });
 
@@ -211,11 +227,11 @@ test('リッチメニュー設定確認は LINE に登録しない（GET のみ�
   const e = env();
   const r = e.ctx.adminRun('richMenuCheck');
   assert.equal(r.ok, true);
-  assert.match(r.message, /【準備中】ご予約はこちら → 「現在準備中です」を返信（URL 未設定）\n    タップ領域 x:0〜1542 \/ y:0〜535/);
-  assert.match(r.message, /【OK】予約確認 → LINE トークで予約IDの入力を開始\n    タップ領域 x:0〜514 \/ y:536〜1018/);
-  assert.match(r.message, /【OK】お問い合わせ → LINE トークでお問い合わせメニューを表示\n    タップ領域 x:515〜1028 \/ y:536〜1018/);
-  assert.match(r.message, /【準備中】よくある質問 → 「現在準備中です」を返信（URL 未設定）\n    タップ領域 x:1029〜1542 \/ y:536〜1018/);
-  assert.match(r.message, /【OK】空と都市を巡るヘリチャーター案内\.png（image\/jpeg・1543×1019px・420KB）\n    PNG（2200KB）を JPEG（420KB）に変換して使用/);
+  assert.match(r.message, /【準備中】ご予約はこちら → 「現在準備中です」を返信（URL 未設定）\n    タップ領域 x:0〜2499 \/ y:0〜884/);
+  assert.match(r.message, /【OK】予約確認 → LINE トークで予約IDの入力を開始\n    タップ領域 x:0〜832 \/ y:885〜1685/);
+  assert.match(r.message, /【OK】お問い合わせ → LINE トークでお問い合わせメニューを表示\n    タップ領域 x:833〜1665 \/ y:885〜1685/);
+  assert.match(r.message, /【準備中】よくある質問 → 「現在準備中です」を返信（URL 未設定）\n    タップ領域 x:1666〜2499 \/ y:885〜1685/);
+  assert.match(r.message, /【OK】SKY_STANDARD_LINE_2500x1686\.jpg（image\/jpeg・2500×1686px・800KB）/);
   assert.match(r.message, /【未登録】既定のリッチメニューはまだ登録されていません/);
   assert.match(r.message, /BOOKING_SITE_URL・FAQ_PAGE_URL を入力し、「リッチメニュー登録・更新」を実行するとリンク方式に切り替わります/);
   const lineCalls = e.fetchCalls.filter((c) => /api(-data)?\.line\.me/.test(c.url));
@@ -237,14 +253,14 @@ test('登録済みメニューと比較：URL 設定後は「要再登録」、�
   const m = e.ctx.adminRun('richMenuCheck').message;
   assert.match(m, /【要再登録】/);
   assert.match(m, /ご予約はこちら: postback（準備中表示・LINE内の操作） → リンク に切り替えが必要/);
-  // 現在 LINE に登録されている旧メニュー（2500×1686・6領域）との差も表示する
+  // 構成の異なるメニュー（旧 6領域）が登録されている場合は差を表示する
   registered = { size: { width: 2500, height: 1686 }, areas: [1, 2, 3, 4, 5, 6].map((i) => ({ bounds: { x: 0, y: 0, width: 1, height: 1 }, action: { type: 'message', label: 'x' + i, text: 'x' } })) };
-  assert.match(e.ctx.adminRun('richMenuCheck').message, /メニューの構成が異なります（LINE 側: 2500×1686・6領域 → 新: 1543×1019・4領域）/);
+  assert.match(e.ctx.adminRun('richMenuCheck').message, /メニューの構成が異なります（LINE 側: 2500×1686・6領域 → 新: 2500×1686・4領域）/);
 });
 
 /* ---------- 登録（モック） ---------- */
 
-test('登録：検証→作成→画像アップロード（JPEG）→既定に設定→旧メニュー削除、シートの実装状態を更新', () => {
+test('登録：検証→作成→画像アップロード→既定に設定。切り替え前のメニューは削除せずに ID を記録、シートの実装状態を更新', () => {
   const calls = [];
   const fetch = (url, p) => {
     calls.push((p.method || 'get') + ' ' + url.replace(/^https:\/\/api(-data)?\.line\.me/, ''));
@@ -258,10 +274,14 @@ test('登録：検証→作成→画像アップロード（JPEG）→既定に�
   assert.match(r.message, /準備中」と表示されるボタン: ご予約はこちら、よくある質問/);
   assert.deepEqual(calls.filter((c) => /richmenu/.test(c)), [
     'get /v2/bot/user/all/richmenu', 'post /v2/bot/richmenu/validate', 'post /v2/bot/richmenu',
-    'post /v2/bot/richmenu/richmenu-new/content', 'post /v2/bot/user/all/richmenu/richmenu-new', 'delete /v2/bot/richmenu/richmenu-old']);
+    'post /v2/bot/richmenu/richmenu-new/content', 'post /v2/bot/user/all/richmenu/richmenu-new']);
+  assert.ok(!calls.some((c) => /^delete/.test(c)), '既存のリッチメニューを削除しない');
+  assert.equal(e.props.PREVIOUS_RICHMENU_ID, 'richmenu-old');
+  assert.equal(e.props.CURRENT_RICHMENU_ID, 'richmenu-new');
+  assert.match(r.message, /切り替え前のメニュー（richmenu-old）は削除せずに残しています/);
   const upload = e.fetchCalls.find((c) => /\/content$/.test(c.url));
   assert.equal(upload.params.contentType, 'image/jpeg');
-  assert.equal(upload.params.payload.length, 420 * 1024, '変換後の JPEG をアップロード');
+  assert.equal(upload.params.payload.length, 800 * 1024);
   const sheet = e.rows('リッチメニュー');
   const st = Object.fromEntries(sheet.map((x) => [x['表示名'], x['実装状態'].replace(/ \d.*/, '')]));
   assert.equal(st['予約確認'], '登録済み');

@@ -72,10 +72,21 @@ function normalizeMessages_(messages) {
 
 /** 現在処理中のイベントで応答済みか（Webhook 再処理可否の判定に使用） */
 var __replySent = false;
+/** この実行で使用した応答トークン（同じトークンへの2回目の返信を送らない） */
+var __usedReplyTokens = {};
 
-/** 応答メッセージ（replyToken は1回限り・短時間有効） */
+/**
+ * 応答メッセージ（replyToken は1回限り・短時間有効）。
+ * 同じ実行の中で同じ replyToken に2回目の返信をしようとした場合は送らずに記録する（LINE 側でもエラーになるため）。
+ * 別の実行への再送（同じ Webhook イベント）は 01_Webhook.gs の claimEvent_ で除外している。
+ */
 function replyMessage_(replyToken, messages) {
   if (!replyToken) return null;
+  if (__usedReplyTokens[replyToken]) {
+    logWarn_('line.reply_token_reused', {});
+    return null;
+  }
+  __usedReplyTokens[replyToken] = true;
   var res = lineFetch_('post', '/v2/bot/message/reply', {
     replyToken: replyToken,
     messages: normalizeMessages_(messages)
